@@ -1,0 +1,13 @@
+{
+  "scriptFile": "event_receiver.py",
+  "bindings": [
+    {
+      "name": "message",
+      "type": "serviceBusTrigger",
+      "direction": "in",
+      "topicName": "tx-events",
+      "subscriptionName": "pipeline-sub",
+      "connection": "SERVICE_BUS_CONNECTION_STRING"
+    }
+  ]
+}
