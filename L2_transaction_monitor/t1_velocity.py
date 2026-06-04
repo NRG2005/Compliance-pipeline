@@ -4,9 +4,9 @@ T1: Velocity Check
 - Structuring detection (e.g., 5x $9k pattern)
 """
 
-def check_velocity(transaction_history):
+async def check_velocity(transaction_data, transaction_history=None):
     """
     Analyzes the transaction history for velocity-based patterns.
     """
-    # TODO: Implement velocity check logic
-    pass
+    # Placeholder for the first runnable version of L2.
+    return 0.0

@@ -4,11 +4,16 @@ T2: Watchlist Check
 - Fuzzy match (rapidfuzz)
 """
 # Make sure to install the rapidfuzz library: pip install rapidfuzz
-from rapidfuzz import process, fuzz
+try:
+    from rapidfuzz import process, fuzz
+except ImportError:  # pragma: no cover - optional until T2 is implemented
+    process = None
+    fuzz = None
 
-def check_watchlist(transaction, sanctioned_entities):
+
+async def check_watchlist(transaction, sanctioned_entities=None):
     """
     Checks if entities in the transaction match any sanctioned entities.
     """
-    # TODO: Implement watchlist check logic using fuzzy matching
-    pass
+    # Placeholder for the first runnable version of L2.
+    return 0.0
