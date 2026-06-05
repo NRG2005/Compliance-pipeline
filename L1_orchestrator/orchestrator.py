@@ -28,12 +28,39 @@ async def handle_event(event):
 
     # 3. Full pipeline execution
     print("L1: No case memory match or rule changed. Executing full pipeline.")
-    suspicion_score = await l2_main.transaction_monitor(event)
+    l2_result = await l2_main.transaction_monitor(event)
+    suspicion_score = l2_result["composite_score"]
     
     if suspicion_score < 0.7: # Example threshold
         print("L1: Score below threshold. Logging as clear.")
         await l6_main.log_transaction(event, "clear")
     else:
         print("L1: Score above threshold. Proceeding to L3 for legal reasoning.")
-        await l3_main.interpret_regulation(event, suspicion_score)
+        analysis = await l3_main.interpret_regulation(event, suspicion_score)
+        
+        # Merge analysis details into the event payload for subsequent layers
+        case_data = {**event, **analysis}
+        final_score = analysis.get("final_score", 0.0)
+        verdict = analysis.get("verdict", "review")
+        
+        # Route based on final score
+        # >= 0.70 auto-files STR using L4
+        if final_score >= 0.70:
+            print("L1: Routing to L4 (Report Generator).")
+            from L4_report_generator.main import generate_report
+            await generate_report(case_data)
+            
+            if final_score < 0.90:
+                print("L1: Also routing to L5 (Human Review Queue) for dual verification.")
+                print("L5: Case added to Next.js dashboard review queue.")
+        else:
+            print("L1: Routing to L5 (Human Review Queue).")
+            if final_score < 0.50:
+                print("L5: CASE ESCALATED due to low legal confidence!")
+            else:
+                print("L5: Case added to Next.js dashboard review queue.")
+                
+        # L6 Audit Log
+        print("L1: Proceeding to L6 (Audit Logger).")
+        await l6_main.log_transaction(event, verdict)
 

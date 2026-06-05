@@ -4,7 +4,6 @@ This script can be used to trigger the pipeline for a single transaction for tes
 or could be adapted to run as a continuous service.
 """
 import asyncio
-from L0_event_ingestion import event_receiver
 from L1_orchestrator import orchestrator
 
 async def main(event_payload):

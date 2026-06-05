@@ -15,7 +15,7 @@ async def regulatory_watch_job():
     print("L7: Starting regulatory watch job...")
     
     # 1. Scrape sources for new/updated documents
-    new_documents = scrape_sources()
+    new_documents = await scrape_sources()
     
     for doc in new_documents:
         # 2. If PDF, perform OCR
