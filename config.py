@@ -30,6 +30,10 @@ class Config:
     DOC_INTELLIGENCE_ENDPOINT = os.environ.get("DOC_INTELLIGENCE_ENDPOINT")
     DOC_INTELLIGENCE_KEY = os.environ.get("DOC_INTELLIGENCE_KEY")
 
+    # Ollama / local model gateway
+    OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+    OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "phi4-mini:latest")
+
     # Other
     FIU_IND_DEADLINE_DAYS = 7
 
