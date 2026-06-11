@@ -29,7 +29,24 @@ async def transaction_monitor(transaction_data):
         check_geo_anomaly(transaction_data)
     )
     
-    # TODO: Implement the weighted scoring formula to combine results from all 6 checks
-    suspicion_score = 0 # Placeholder
+    c1_res, c2_res, c3_res, c4_res, c5_res, c6_res = results
+    
+    # Placeholder for combining results from all 6 checks.
+    # C4 returns a risk dict (from the old T3 logic).
+    c4_score = float(c4_res.get("risk_score", 0.0)) if isinstance(c4_res, dict) else 0.0
+    
+    suspicion_score = round(
+        (0.15 * (0.0 if c1_res is None else float(c1_res))) +
+        (0.20 * (0.0 if c2_res is None else float(c2_res))) +
+        (0.10 * (0.0 if c3_res is None else float(c3_res))) +
+        (0.35 * c4_score) +
+        (0.10 * (0.0 if c5_res is None else float(c5_res))) +
+        (0.10 * (0.0 if c6_res is None else float(c6_res))),
+        3
+    )
+
+    if isinstance(c4_res, dict):
+        print(f"L2: C4 Account Risk findings: {c4_res.get('faults', [])}")
+
     
     return suspicion_score
