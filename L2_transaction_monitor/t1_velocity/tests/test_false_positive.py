@@ -195,6 +195,24 @@ def test_fired_is_true_from_txn3():
         "T1 fires and L3 resolves. fired=False is a coverage gap."
     )
 
+def test_credit_line_probing_does_not_fire_for_salary():
+    """
+    P0014 (Salary) is a low-risk structuring purpose, but it is NOT
+    a credit/loan purpose code (P0013, P0022, P0023). T8 must never fire.
+
+    This guards against a future mis-classification where someone adds
+    P0014 to CREDIT_LINE_PURPOSE_CODES by mistake.
+    """
+    for i, tx in enumerate(SALARY_TXS):
+        result = run(run_t1(tx))
+        sc6 = result["sub_scores"].get("credit_line_probing", 0.0)
+        assert sc6 == 0.0, (
+            f"TXN {i+1}: credit_line_probing must be 0.0 for P0014 salary, got {sc6}"
+        )
+        assert "T1_CREDIT_PROBING" not in result["flags"], (
+            f"TXN {i+1}: T1_CREDIT_PROBING must not fire for salary disbursements"
+        )
+    print("\n[T8 / SALARY] T1_CREDIT_PROBING correctly absent — P0014 ≠ credit purpose")
 
 if __name__ == "__main__":
     print("=" * 60)

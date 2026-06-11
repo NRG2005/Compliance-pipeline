@@ -341,3 +341,82 @@ async def check_high_value_threshold(
             "threshold_ratio":      round(amount / HIGH_VALUE_THRESHOLD_INR, 2) if fired else 0.0,
         },
     )
+
+# ---------------------------------------------------------------------------
+# Sub-check 6: Credit-line limit-probing (T8, merged into C1)
+# ---------------------------------------------------------------------------
+
+from thresholds import (
+    CREDIT_LINE_PURPOSE_CODES,
+    CREDIT_LINE_MIN_COUNT,
+    CREDIT_LINE_SMALL_RATIO,
+)
+
+async def check_credit_line_probing(
+    current_tx: dict,
+    baseline: dict,
+    recent_txns_24h: list[dict],
+) -> SubCheckResult:
+    """
+    Detects deliberate probing of credit limits via repeated small
+    drawdowns with credit/loan purpose codes within a 24h window.
+
+    Regulatory anchor: RBI FRM Master Directions 2024 EWS (Clause 8.3)
+    — real-time monitoring of credit transactions for unusual patterns.
+    Also PMLA Rule 3(1)(B): integrally connected series of transactions.
+
+    Pattern: 3+ transactions with purpose code in {P0013, P0022, P0023},
+    each individually small (< 40% of account's p90_amount), summing to
+    a meaningful total within 24 hours.
+
+    Example: ACC0014 (Kapoor Enterprises) sending 4× ₹9,800 loan
+    repayments in a day when p90 is ₹80K — each below radar, aggregate
+    deliberate.
+    """
+    is_credit_purpose = current_tx.get("purpose_code", "") in CREDIT_LINE_PURPOSE_CODES
+    p90 = baseline.get("p90_amount", 0.0)
+    small_threshold = p90 * CREDIT_LINE_SMALL_RATIO if p90 > 0 else float("inf")
+    is_small_drawdown = current_tx["amount_inr"] < small_threshold
+
+    # Count prior credit-purpose transactions in the 24h window
+    prior_credit_txns = [
+        t for t in recent_txns_24h
+        if t.get("purpose_code", "") in CREDIT_LINE_PURPOSE_CODES
+        and t["amount_inr"] < small_threshold
+    ]
+    prior_credit_count = len(prior_credit_txns)
+    total_credit_count = prior_credit_count + (1 if (is_credit_purpose and is_small_drawdown) else 0)
+
+    # Aggregate amount across the probing series
+    prior_credit_total = sum(t["amount_inr"] for t in prior_credit_txns)
+    total_credit_amount = prior_credit_total + (
+        current_tx["amount_inr"] if (is_credit_purpose and is_small_drawdown) else 0
+    )
+
+    fired = (
+        is_credit_purpose
+        and is_small_drawdown
+        and total_credit_count >= CREDIT_LINE_MIN_COUNT
+    )
+
+    if is_credit_purpose and is_small_drawdown and total_credit_count > 0:
+        score = round(min(total_credit_count / CREDIT_LINE_MIN_COUNT, 1.0), 4)
+    else:
+        score = 0.0
+
+    return SubCheckResult(
+        fired=fired,
+        score=score,
+        triggered_rule="PMLA_RULE_3_CREDIT_PROBING" if fired else None,
+        evidence={
+            "is_credit_purpose_code":      is_credit_purpose,
+            "purpose_code":                current_tx.get("purpose_code", ""),
+            "current_amount_inr":          round(current_tx["amount_inr"], 2),
+            "small_drawdown_threshold":    round(small_threshold, 2),
+            "is_small_drawdown":           is_small_drawdown,
+            "prior_credit_txns_24h":       prior_credit_count,
+            "total_credit_txns_24h":       total_credit_count,
+            "total_credit_amount_24h":     round(total_credit_amount, 2),
+            "min_count_threshold":         CREDIT_LINE_MIN_COUNT,
+        },
+    )

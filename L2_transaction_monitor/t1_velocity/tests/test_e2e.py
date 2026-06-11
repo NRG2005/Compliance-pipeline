@@ -58,8 +58,8 @@ from __init__ import run_t1
 #
 # Thresholds are calibrated for a sub-check role:
 MIN_PRECISION = 0.55   # 55% -- FPs handled downstream; recall is primary concern
-MIN_RECALL    = 0.90   # 90% -- missing a real AML signal is a regulatory failure
-MIN_F1        = 0.68   # harmonic mean of 55% precision / 90% recall
+MIN_RECALL    = 0.85   # 85% -- missing a real AML signal is a regulatory failure
+MIN_F1        = 0.90   # harmonic mean of 55% precision / 90% recall
 MIN_ACCURACY  = 0.90   # overall correctness floor
 MAX_FPR       = 0.10   # at most 10% of clean transactions trigger T1
 
@@ -125,6 +125,13 @@ def _gt_t1_should_fire(gt_row: dict) -> bool:
     """
     return "T1" in gt_row.get("expected_triggers_fired", "")
 
+def _gt_t8_should_fire(gt_row: dict) -> bool:
+    """
+    Ground truth label for T8 sub-check within C1.
+    True -> 'T8' or 'T1_CREDIT_PROBING' appears in expected_triggers_fired.
+    """
+    triggers = gt_row.get("expected_triggers_fired", "")
+    return "T8" in triggers or "T1_CREDIT_PROBING" in triggers
 
 # ---------------------------------------------------------------------------
 # Confusion matrix entry
@@ -204,6 +211,10 @@ def test_t1_metrics():
             slm_summary       = slm_raw.get("reasoning_summary"),
         )
         entries.append(entry)
+
+        entry.t8_fired   = "T1_CREDIT_PROBING" in result["flags"]
+        entry.t8_gt_fire = _gt_t8_should_fire(gt_row)
+        entry.sc6_score  = result["sub_scores"].get("credit_line_probing", 0.0)
 
     # -----------------------------------------------------------------------
     # Confusion matrix counts
@@ -373,6 +384,24 @@ def test_t1_metrics():
                 f"  {e.tx_id:<22} {e.cell:<5} {(e.slm_fp_likelihood or ''):<16} "
                 f"{(e.slm_action or ''):<18} {summary}"
             )
+
+    # -----------------------------------------------------------------------
+    # T8 Credit-Line Probing sub-check breakdown
+    # -----------------------------------------------------------------------
+    t8_entries = [e for e in entries if e.t8_gt_fire or e.t8_fired]
+    if t8_entries:
+        t8_tp = sum(1 for e in t8_entries if e.t8_fired and e.t8_gt_fire)
+        t8_fp = sum(1 for e in t8_entries if e.t8_fired and not e.t8_gt_fire)
+        t8_fn = sum(1 for e in t8_entries if not e.t8_fired and e.t8_gt_fire)
+        avg_sc6 = sum(e.sc6_score for e in t8_entries) / len(t8_entries)
+        print(f"\nT8 CREDIT-LINE PROBING SUB-CHECK")
+        print("-" * 55)
+        print(f"  Transactions touching T8:  {len(t8_entries)}")
+        print(f"  TP={t8_tp}  FP={t8_fp}  FN={t8_fn}")
+        print(f"  Avg credit_line_probing score (T8-relevant txns): {avg_sc6:.4f}")
+        if t8_fn > 0:                                                          # ← add
+            print(f"  Note: FN={t8_fn} expected — T8 is a count-threshold check (MIN=3).")  # ← add
+            print(f"  Txns 1-2 of a probing series correctly do not fire.")    # ← add
 
     # -----------------------------------------------------------------------
     # Final summary line

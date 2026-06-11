@@ -151,6 +151,15 @@ def test_txn5_score_in_expected_band():
     print(f"  sub_scores: {result['sub_scores']}")
     print(f"  triggered_rules: {result['triggered_rule_refs']}")
 
+    expected_keys = {
+        "count_velocity", "amount_band_structuring",
+        "same_beneficiary_clustering", "volume_spike",
+        "high_value_threshold", "credit_line_probing",   # ← new
+    }
+
+    assert expected_keys == set(result["sub_scores"].keys()), (
+        f"sub_scores keys mismatch: {set(result['sub_scored'].keys())}"
+    )
     assert result["fired"] is True
     assert "T1_STRUCTURING" in result["flags"]
     assert 0.70 <= result["composite_score"] <= 0.89, (
@@ -171,6 +180,22 @@ def test_same_beneficiary_clustering_fires():
         "Same-beneficiary sub-check score should be > 0 by txn 2"
     )
 
+def test_credit_line_probing_does_not_fire():
+    """
+    T8 credit-line probing must NOT fire for the smurfing scenario.
+    Purpose code P0099 (general) is not a credit/loan purpose code.
+    T1_CREDIT_PROBING appearing here would be a false positive.
+    """
+    for i, tx in enumerate(SMURFING_TXS):
+        result = run(run_t1(tx))
+        sc6 = result["sub_scores"].get("credit_line_probing", 0.0)
+        assert sc6 == 0.0, (
+            f"TXN {i+1}: credit_line_probing should be 0.0 for P0099 purpose code, got {sc6}"
+        )
+        assert "T1_CREDIT_PROBING" not in result["flags"], (
+            f"TXN {i+1}: T1_CREDIT_PROBING should NOT fire for general-purpose smurfing"
+        )
+    print("\n[T8 CHECK] credit_line_probing correctly absent for all 5 smurfing txns")
 
 if __name__ == "__main__":
     print("=" * 60)
@@ -189,3 +214,6 @@ if __name__ == "__main__":
     print("  PASS: txn 5 composite score in 0.70–0.89 band")
 
     print("\nAll STRUCTURING tests passed.")
+
+    test_credit_line_probing_does_not_fire()
+    print("  PASS: T8 credit_line_probing does not fire for P0099 smurfing")

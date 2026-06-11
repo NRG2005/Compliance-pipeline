@@ -30,6 +30,7 @@ from checks import (
     check_same_beneficiary_clustering,
     check_volume_spike,
     check_high_value_threshold,
+    check_credit_line_probing,
 )
 from cosmos_client import get_account_baseline, get_rolling_transactions
 from thresholds import T1_WEIGHTS, SLM_REASONING_THRESHOLD, HIGH_VALUE_THRESHOLD_INR
@@ -83,14 +84,16 @@ async def run_t1(event_payload: dict) -> dict:
     )
     r4 = await check_volume_spike(current_tx_dict, baseline, recent_24h)
     r5 = await check_high_value_threshold(current_tx_dict)
-
+    r6 = await check_credit_line_probing(current_tx_dict, baseline, recent_24h)
+    
     # --- Composite score (weighted sum) ---
     composite = round(
         r1.score * T1_WEIGHTS["count_velocity"]
         + r2.score * T1_WEIGHTS["amount_band_structuring"]
         + r3.score * T1_WEIGHTS["same_beneficiary_clustering"]
         + r4.score * T1_WEIGHTS["volume_spike"]
-        + r5.score * T1_WEIGHTS["high_value_threshold"],
+        + r5.score * T1_WEIGHTS["high_value_threshold"]
+        + r6.score * T1_WEIGHTS["credit_line_probing"],
         4,
     )
 
@@ -100,7 +103,7 @@ async def run_t1(event_payload: dict) -> dict:
     # in a structuring series — even a single just-below-₹50K payment is a weak
     # velocity signal worth surfacing, even before the pattern is confirmed.
     MINIMUM_SIGNAL = 0.10   # must exceed single in-band txn score (0.133) to avoid single-txn FPs
-    any_sub_fired = r1.fired or r2.fired or r3.fired or r4.fired or r5.fired
+    any_sub_fired = r1.fired or r2.fired or r3.fired or r4.fired or r5.fired or r6.fired
     flags = []
     if any_sub_fired or composite >= MINIMUM_SIGNAL:
         flags.append("T1_VELOCITY")
@@ -128,6 +131,9 @@ async def run_t1(event_payload: dict) -> dict:
     # This eliminates noise like Rs 3,428 Airtel recharge
     if not any_sub_fired and composite < 0.10:
         flags = [f for f in flags if f != "T1_VELOCITY"]
+
+    if r6.fired:
+        flags.append("T1_CREDIT_PROBING")
 
     # -------------------------------------------------------------------------
     # Deterministic suppression: single first in-band transaction to a
@@ -175,6 +181,7 @@ async def run_t1(event_payload: dict) -> dict:
         | {"sc3_" + k: v for k, v in r3.evidence.items()}
         | {"sc4_" + k: v for k, v in r4.evidence.items()}
         | {"sc5_" + k: v for k, v in r5.evidence.items()}
+        | {"sc6_" + k: v for k, v in r6.evidence.items()}
     )
 
     # --- Collect triggered rule refs (deduplicated) ---
@@ -182,7 +189,7 @@ async def run_t1(event_payload: dict) -> dict:
         rule for rule in [
             r1.triggered_rule, r2.triggered_rule,
             r3.triggered_rule, r4.triggered_rule,
-            r5.triggered_rule,
+            r5.triggered_rule, r6.triggered_rule,
         ]
         if rule is not None
     })
@@ -254,6 +261,7 @@ async def run_t1(event_payload: dict) -> dict:
             "same_beneficiary_clustering": r3.score,
             "volume_spike":                r4.score,
             "high_value_threshold":        r5.score,
+            "credit_line_probing":         r6.score,
         },
         composite_score=composite,
         evidence=evidence,

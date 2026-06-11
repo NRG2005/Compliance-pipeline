@@ -72,8 +72,9 @@ T1_WEIGHTS = {
     "count_velocity":              0.20,
     "amount_band_structuring":     0.35,
     "same_beneficiary_clustering": 0.25,
-    "volume_spike":                0.10,
+    "volume_spike":                0.07,   
     "high_value_threshold":        0.10,
+    "credit_line_probing":         0.03,   
 }
 
 # ---------------------------------------------------------------------------
@@ -111,3 +112,27 @@ HIGH_VALUE_SCORE         = 0.40          # base score when threshold is just cro
 # on every transaction with a marginal in-band amount.
 
 SLM_REASONING_THRESHOLD = 0.04
+
+# ---------------------------------------------------------------------------
+# CREDIT-LINE LIMIT-PROBING (T8, merged into C1)
+# ---------------------------------------------------------------------------
+# Purpose codes that indicate credit utilisation or loan drawdown activity.
+# A burst of these in a short window suggests deliberate limit-probing.
+CREDIT_LINE_PURPOSE_CODES = {"P0013", "P0022", "P0023"}  
+# P0013 = Loan repayment, P0022 = Credit utilisation, P0023 = Loan disbursement
+
+# Minimum number of credit-purpose transactions in a 24h window to fire
+CREDIT_LINE_MIN_COUNT = 3
+
+# The probing window — we look at 24h, same as structuring
+CREDIT_LINE_WINDOW_HOURS = 24
+
+# Fraction of the account's p90_amount that defines "small drawdown"
+# A drawdown is suspicious when it's well below the account's normal large txn size
+# but repeats rapidly. We flag when each txn < CREDIT_LINE_SMALL_RATIO * p90_amount.
+CREDIT_LINE_SMALL_RATIO = 0.40
+
+# Weight contribution of T8 sub-check within C1's composite score
+# Re-pools from the spec: T1 was 0.25, T8 was 0.02, pooled C1 = 0.27
+# Within T1's internal weights, T8 gets a proportional slice
+T8_INTERNAL_WEIGHT = 0.07  # carved out of volume_spike (was 0.10 → 0.07 after T8 added)

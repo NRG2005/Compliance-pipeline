@@ -181,17 +181,20 @@ def test_t1_velocity_fires_from_txn4():
     )
 
 
-def test_no_structuring_flag():
+def test_no_structuring_or_credit_probing_flag():
     """
-    Amounts (₹9,974 – ₹24,445) are well below the ₹40,000 structuring band.
-    T1_STRUCTURING must NEVER fire for this scenario.
+    Neither T1_STRUCTURING (amounts not in band) nor T1_CREDIT_PROBING
+    (purpose code is P0099, not credit) should fire for this scenario.
     """
     for i, tx in enumerate(VELOCITY_TXS):
         result = run(run_t1(tx))
         assert "T1_STRUCTURING" not in result["flags"], (
-            f"T1_STRUCTURING incorrectly fired on txn {i+1} (amount={tx['amount_inr']})"
+            f"T1_STRUCTURING incorrectly fired on txn {i+1}"
         )
-    print("\n[STRUCTURING CHECK] T1_STRUCTURING correctly absent for all 8 txns")
+        assert "T1_CREDIT_PROBING" not in result["flags"], (
+            f"T1_CREDIT_PROBING incorrectly fired on txn {i+1} — purpose is P0099"
+        )
+    print("\n[FLAG CHECK] T1_STRUCTURING and T1_CREDIT_PROBING correctly absent")
 
 
 def test_later_txns_score_in_expected_band():
@@ -217,6 +220,38 @@ def test_later_txns_score_in_expected_band():
         )
         prev_score = result["composite_score"]
 
+def test_credit_line_probing_does_not_fire():
+    """
+    Velocity spike scenario uses P0099 (general) purpose code.
+    T8 credit-line probing must never fire here — wrong purpose code category.
+    """
+    for i, tx in enumerate(VELOCITY_TXS):
+        result = run(run_t1(tx))
+        sc6 = result["sub_scores"].get("credit_line_probing", 0.0)
+        assert sc6 == 0.0, (
+            f"TXN {i+1}: credit_line_probing should be 0.0, got {sc6}"
+        )
+        assert "T1_CREDIT_PROBING" not in result["flags"], (
+            f"TXN {i+1}: T1_CREDIT_PROBING must not fire for non-credit purpose codes"
+        )
+    print("\n[T8 CHECK] credit_line_probing correctly absent for all 8 velocity txns")
+
+
+def test_sub_scores_have_six_keys():
+    """
+    After T8 merge, sub_scores must contain exactly 6 keys.
+    A missing key means T8 wasn't wired into the orchestrator correctly.
+    """
+    result = run(run_t1(VELOCITY_TXS[0]))
+    expected = {
+        "count_velocity", "amount_band_structuring",
+        "same_beneficiary_clustering", "volume_spike",
+        "high_value_threshold", "credit_line_probing",
+    }
+    assert expected == set(result["sub_scores"].keys()), (
+        f"Expected 6 sub-score keys after T8 merge, got: {set(result['sub_scores'].keys())}"
+    )
+    print(f"\n[SUB-SCORES] All 6 keys present: {sorted(result['sub_scores'].keys())}")
 
 if __name__ == "__main__":
     print("=" * 60)
