@@ -17,11 +17,19 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib import error
 
-# Add root dir to sys.path to import L3 llm_client
+# L3 llm_client and pandas are only needed by the legacy LLM-based risk scorer.
+# The unified pipeline uses evaluate_row() (deterministic), so these are optional.
 sys.path.append(str(Path(__file__).resolve().parent.parent))
-from L3_regulation_interpreter.llm_client import chat_json
+try:
+    from L3_regulation_interpreter.llm_client import chat_json
+except Exception:  # pragma: no cover - L3 not present in L2-only deliverable
+    def chat_json(*_a, **_k):
+        raise RuntimeError("L3 llm_client unavailable in L2-only mode")
 
-import pandas as pd
+try:
+    import pandas as pd
+except Exception:  # pragma: no cover
+    pd = None
 
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
@@ -811,3 +819,62 @@ if __name__ == "__main__":
         "confusion_matrix": metrics.get("confusion_matrix"),
     }
     print(json.dumps(summary_metrics, indent=2))
+
+
+# ===========================================================================
+# Unified-pipeline adapter  (used by orchestrator.py)
+# ===========================================================================
+# The generic data-quality scorer above is retained, but the unified L2 layer
+# uses the focused dormancy + new-account logic the C4 spec actually calls for:
+#
+#   Dormancy (T7): a long-dormant account suddenly reactivating. The dataset
+#     encodes this as a large `account_dormancy_days` with Min-KYC, very low
+#     historical monthly activity. Clean accounts sit at 0-5 dormant days.
+#
+#   New-account risk (T3): a young account (age < ~90d) on Min KYC moving an
+#     amount far above a plausible new-account size. Young Full-KYC accounts
+#     making small payments are legitimate and must NOT fire (precision guard).
+#
+# Regulatory anchor: RBI FRM Master Directions 2024 (RFA / EWS); NPCI dormant-
+# UPI measure effective 1 Apr 2025. (Per Layer2.pdf C4 citation index.)
+
+C4_DORMANCY_DAYS = 150          # dormant-reactivation floor (clean <= ~5)
+C4_NEW_ACCOUNT_AGE_DAYS = 90    # "young account" ceiling
+C4_NEW_ACCOUNT_MIN_AMOUNT = 150_000.0   # high-value floor for a young account
+_C4_MIN_KYC = {"min kyc", "basic", "aadhaar otp", "simplified kyc", "min_kyc"}
+
+
+def _c4_num(v, default=0.0):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def evaluate_row(row, dl):
+    """Return {fired, score, trigger} for one unified transactions.csv row."""
+    acc = dl.account_for(row.get("sender_account_id", ""))
+    if not acc:
+        return {"fired": False, "score": 0.0, "trigger": None}
+
+    dormancy_days = _c4_num(acc.get("account_dormancy_days"))
+    age_days = _c4_num(acc.get("account_age_days"))
+    kyc = (acc.get("kyc_status") or "").strip().lower()
+    amount = _c4_num(row.get("amount_inr"))
+    is_min_kyc = kyc in _C4_MIN_KYC
+
+    # --- Dormant reactivation ---
+    if dormancy_days >= C4_DORMANCY_DAYS:
+        score = round(min(dormancy_days / 365.0, 1.0), 4)
+        return {"fired": True, "score": score, "trigger": "C4_dormancy"}
+
+    # --- New-account high-value (young + Min KYC + large amount) ---
+    if (
+        age_days < C4_NEW_ACCOUNT_AGE_DAYS
+        and is_min_kyc
+        and amount >= C4_NEW_ACCOUNT_MIN_AMOUNT
+    ):
+        score = round(min(0.5 + amount / 1_000_000.0, 1.0), 4)
+        return {"fired": True, "score": score, "trigger": "C4_newaccount"}
+
+    return {"fired": False, "score": 0.0, "trigger": None}

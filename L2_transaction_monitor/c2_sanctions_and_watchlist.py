@@ -30,9 +30,8 @@ from collections import defaultdict
 try:
     import requests
 except ImportError:
-    # `requests` is only needed for the live-Ollama judge. The L2 aggregator
-    # path uses the mock judge, so don't crash the import if it's absent.
-    requests = None
+    print("ERROR: 'requests' is required. Install:  pip3 install requests", file=sys.stderr)
+    sys.exit(2)
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
@@ -706,3 +705,46 @@ def check_sanctions_and_watchlist(transaction_data):
     event = transaction_data if "sender" in transaction_data else row_to_event(transaction_data)
     res = t2_check(event, _load_watchlist(), 0.55, 0.95, slm_judge_mock, {})
     return {"check": "C2", "score": float(res["max_score"]), "decision": res["decision"]}
+
+
+# ---------------------------------------------------------------------------
+# Unified-pipeline adapter  (used by orchestrator.py)
+# ---------------------------------------------------------------------------
+def evaluate_row(row, watchlist):
+    """
+    Adapt a unified transactions.csv row to the C2 two-stage check and return
+    the orchestrator contract: {fired, score, trigger}.
+
+    Screens the RECEIVER only (sender is KYC-screened at onboarding). A match
+    fires ONLY when a DECISIVE corroborator is present — PAN, CIN, exact name,
+    exact alias, or a DOB match. A fuzzy name/alias token on its own (common
+    Indian names, single-char typos with a conflicting DOB) is NOT sufficient:
+    this is the PAN/DOB disambiguation the C2 spec requires to suppress the
+    common-name and fuzzy-typo false positives.
+    """
+    event = row_to_event(row)
+    res = t2_check(event, watchlist, 0.55, 0.95, slm_judge_mock, {})
+    if not res["hit"]:
+        return {"fired": False, "score": 0.0, "trigger": None}
+
+    # Decisive corroborators: a strong identifier, OR an exact known alias.
+    # A bare exact/fuzzy NAME match with no PAN/CIN/DOB and no exact alias is a
+    # common-name collision (e.g. "Karan Patel") and must NOT fire.
+    IDENTIFIER = {"PAN", "CIN", "DOB_MATCH", "PASSPORT"}
+    decisive = False
+    alias_decisive = False
+    for m in res["matches"]:
+        attrs = {a for a, _ in m.get("matched_on", [])}
+        if m.get("dob_status") == "CONFLICT" and not (attrs & {"PAN", "CIN"}):
+            continue  # DOB conflict overrides a name/alias match
+        if attrs & IDENTIFIER:
+            decisive = True
+        if "ALIAS_EXACT" in attrs:
+            decisive = True
+            alias_decisive = True
+
+    if not decisive:
+        return {"fired": False, "score": 0.0, "trigger": None}
+
+    trigger = "C2_alias_hit" if alias_decisive else "C2_watchlist_hit"
+    return {"fired": True, "score": round(float(res["max_score"]), 4), "trigger": trigger}

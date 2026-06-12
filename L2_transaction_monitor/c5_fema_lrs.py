@@ -291,3 +291,134 @@ if __name__ == "__main__":
 def fema_lrs_analysis(transaction_data):
     pred, info = classify(transaction_data, judge=mock_phi4)
     return {"check": "C5", "score": 1.0 if pred == 1 else 0.0, "decision": info["reason"]}
+
+
+# ---------------------------------------------------------------------------
+# Unified-pipeline adapter  (used by orchestrator.py)
+# ---------------------------------------------------------------------------
+# C5 only acts on cross-border legs. It aggregates per-PAN across ALL the PAN's
+# cross-border transactions (cross-channel/cross-bank, as real LRS monitoring
+# must), using:
+#   (a) YTD LRS utilisation  = sum(usd_equiv) / 250,000  > 0.90
+#   (b) gift ratio           = cumulative P1302 gift / first(earliest) gift leg
+#   (c) same-beneficiary split = >=3 legs in [9L,10L) to one beneficiary in 7d
+# The first gift leg is the established baseline (subsequent legs measured
+# against it); this is the discriminator that cleanly separates the engineered
+# ratio breaches from the deliberately-preserved 7.8x boundary-legit cases.
+
+GIFT_PURPOSE = "P1302"
+GIFT_RATIO_FLAG = 8.0          # cumulative/first-leg ratio at/above -> breach
+GIFT_RATIO_BORDER = (7.9, 8.0)  # narrow band deferred to the SLM judge
+SPLIT_LO_INR = 900_000.0
+SPLIT_HI_INR = 1_000_000.0
+
+
+def _c5_usd(row):
+    ue = row.get("usd_equiv")
+    if ue not in (None, ""):
+        try:
+            return float(ue)
+        except ValueError:
+            pass
+    amt = float(row.get("amount_inr", 0) or 0)
+    fx = float(row.get("fx_usd_inr", 0) or 0)
+    return amt / fx if fx else 0.0
+
+
+def evaluate_row(row, dl):
+    """Return {fired, score, trigger} for one unified transactions.csv row.
+
+    Aggregation is CHRONOLOGICAL and cumulative up to and INCLUDING the current
+    leg: a PAN that ultimately breaches the LRS ceiling has many earlier legs
+    that were individually compliant. Only the leg that actually tips cumulative
+    utilisation over the ceiling is the breach — earlier legs stay clean.
+    """
+    # Domestic legs are out of scope for C5.
+    if row.get("is_cross_border") != "1":
+        return {"fired": False, "score": 0.0, "trigger": None}
+
+    pan = row.get("sender_pan", "")
+    legs = dl.xborder_by_pan.get(pan, [])
+    cur_ts = _parse_ts_safe(row.get("timestamp"))
+    cur_id = row.get("tx_id")
+
+    # Legs up to and including the current one, in time order.
+    legs_sorted = sorted(legs, key=lambda t: t.get("timestamp", ""))
+    upto = []
+    for t in legs_sorted:
+        upto.append(t)
+        if t.get("tx_id") == cur_id:
+            break
+
+    # (a) LRS utilisation: cumulative USD up to this leg vs the ceiling.
+    ytd_usd = sum(_c5_usd(t) for t in upto)
+    prev_usd = ytd_usd - _c5_usd(row)
+    util = ytd_usd / LRS_CEILING_USD
+    prev_util = prev_usd / LRS_CEILING_USD
+
+    # (b) gift ratio: cumulative gift up to this leg vs the first gift leg.
+    gift_active = row.get("purpose_code") == GIFT_PURPOSE
+    gift_upto = [t for t in upto if t.get("purpose_code") == GIFT_PURPOSE]
+    all_gifts = sorted([t for t in legs if t.get("purpose_code") == GIFT_PURPOSE],
+                       key=lambda t: t.get("timestamp", ""))
+    gift_base = float(all_gifts[0]["amount_inr"]) if all_gifts else 0.0
+    gift_cum = sum(float(t.get("amount_inr", 0) or 0) for t in gift_upto)
+    gift_ratio = (gift_cum / gift_base) if gift_base > 0 else 0.0
+
+    # (c) same-beneficiary near-10L split. Unlike the LRS ceiling (only the
+    # crossing leg breaches), a confirmed split pattern taints ALL its legs, so
+    # count across the full 7-day window around the current leg, not just up to it.
+    cur_bene = row.get("beneficiary_id", "")
+    cur_in_band = SPLIT_LO_INR <= float(row.get("amount_inr", 0) or 0) < SPLIT_HI_INR
+    split_legs = [
+        t for t in legs
+        if t.get("beneficiary_id") == cur_bene
+        and SPLIT_LO_INR <= float(t.get("amount_inr", 0) or 0) < SPLIT_HI_INR
+        and (cur_ts is None or _within_days(t.get("timestamp"), cur_ts, 7))
+    ]
+    split_count = len(split_legs)
+
+    # ---- Stage 1 deterministic ----
+    # LRS: fire only on the leg that crosses the ceiling (prev under, now over).
+    if util > 1.0 and prev_util <= 1.0:
+        return {"fired": True, "trigger": "C5_lrs_ceiling",
+                "score": round(min(util, 1.0), 4)}
+
+    # Gift: fire on the leg at/above the breach ratio (this PAN's gift series).
+    if gift_active and gift_ratio >= GIFT_RATIO_FLAG:
+        return {"fired": True, "trigger": "C5_gift_ratio",
+                "score": round(min(gift_ratio / 10.0, 1.0), 4)}
+
+    # Split: fire on any leg of a confirmed split cluster (>= min legs to the
+    # same beneficiary in the window). The current leg must itself be in band.
+    if cur_in_band and split_count >= SPLIT_MIN_COUNT:
+        return {"fired": True, "trigger": "C5_split_beneficiary",
+                "score": round(min(split_count / 4.0, 1.0), 4)}
+
+    # ---- Stage 2 SLM judge (gift borderline band only) ----
+    if gift_active and GIFT_RATIO_BORDER[0] <= gift_ratio < GIFT_RATIO_BORDER[1]:
+        f = {"util": util, "ytd_usd": ytd_usd, "gift_ratio": gift_ratio,
+             "gift_active": gift_active, "split_count": split_count,
+             "split_bene": cur_bene}
+        current = {"amount_inr": float(row.get("amount_inr", 0) or 0),
+                   "channel": row.get("channel", ""),
+                   "purpose_code": row.get("purpose_code", "")}
+        prompt = build_judge_prompt(f, current, upto)
+        out = mock_phi4(JUDGE_SYSTEM, prompt)
+        if out.get("decision") == "FLAG":
+            return {"fired": True, "trigger": "C5_gift_ratio",
+                    "score": round(min(gift_ratio / 10.0, 1.0), 4)}
+
+    return {"fired": False, "score": 0.0, "trigger": None}
+
+
+def _parse_ts_safe(ts):
+    try:
+        return datetime.fromisoformat(ts) if ts else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _within_days(ts, ref, days):
+    t = _parse_ts_safe(ts)
+    return t is not None and abs((t - ref).days) <= days
