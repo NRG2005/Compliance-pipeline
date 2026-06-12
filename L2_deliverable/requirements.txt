@@ -1,0 +1,6 @@
+# Layer 2 Transaction Monitor — Python dependencies
+# Core evaluation runs on the standard library alone. These are needed only by
+# the original detector modules (Pydantic models in C1; HTTP client for the
+# optional live Phi-4-mini / Ollama SLM judge in C2 and C5).
+pydantic>=2.0
+requests>=2.28
