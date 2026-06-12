@@ -36,17 +36,17 @@ def _safe_import(module_path: str, func_name: str):
 
 
 check_velocity_and_structuring = _safe_import(
-    "L2_transaction_monitor.c1_velocity_and_structuring", "check_velocity_and_structuring")
+    "L2_transaction_monitor.detectors.c1_velocity_and_structuring", "check_velocity_and_structuring")
 check_sanctions_and_watchlist = _safe_import(
-    "L2_transaction_monitor.c2_sanctions_and_watchlist", "check_sanctions_and_watchlist")
+    "L2_transaction_monitor.detectors.c2_sanctions_and_watchlist", "check_sanctions_and_watchlist")
 analyze_graph_network_flow = _safe_import(
-    "L2_transaction_monitor.c3_graph_network_flow", "analyze_graph_network_flow")
+    "L2_transaction_monitor.detectors.c3_graph_network_flow", "analyze_graph_network_flow")
 calculate_account_risk_and_dormancy = _safe_import(
-    "L2_transaction_monitor.c4_account_risk_and_dormancy", "calculate_account_risk_and_dormancy")
+    "L2_transaction_monitor.detectors.c4_account_risk_and_dormancy", "calculate_account_risk_and_dormancy")
 fema_lrs_analysis = _safe_import(
-    "L2_transaction_monitor.c5_fema_lrs", "fema_lrs_analysis")
+    "L2_transaction_monitor.detectors.c5_fema_lrs", "fema_lrs_analysis")
 check_geo_anomaly = _safe_import(
-    "L2_transaction_monitor.c6_geo_anomaly", "check_geo_anomaly")
+    "L2_transaction_monitor.detectors.c6_geo_anomaly", "check_geo_anomaly")
 
 
 def _to_score(result) -> float:

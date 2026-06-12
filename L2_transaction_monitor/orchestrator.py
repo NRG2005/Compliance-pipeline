@@ -48,7 +48,7 @@ WEIGHTS = {
 # ===========================================================================
 
 # ---- C1 Velocity & Structuring -------------------------------------------
-from . import c1_adapter
+from .detectors import c1_adapter
 
 
 async def run_c1(row, dl):
@@ -56,7 +56,7 @@ async def run_c1(row, dl):
 
 
 # ---- C2 Sanctions & Watchlist --------------------------------------------
-from . import c2_sanctions_and_watchlist as c2mod
+from .detectors import c2_sanctions_and_watchlist as c2mod
 
 
 def _c2_event(row):
@@ -86,7 +86,7 @@ async def run_c2(row, dl):
 
 
 # ---- C3 Graph / Network Flow ---------------------------------------------
-from . import c3_graph_network_flow as c3mod
+from .detectors import c3_graph_network_flow as c3mod
 
 
 async def run_c3(row, dl):
@@ -94,7 +94,7 @@ async def run_c3(row, dl):
 
 
 # ---- C4 Account Risk & Dormancy ------------------------------------------
-from . import c4_account_risk_and_dormancy as c4mod
+from .detectors import c4_account_risk_and_dormancy as c4mod
 
 
 async def run_c4(row, dl):
@@ -102,7 +102,7 @@ async def run_c4(row, dl):
 
 
 # ---- C5 Cross-Border / FEMA-LRS ------------------------------------------
-from . import c5_fema_lrs as c5mod
+from .detectors import c5_fema_lrs as c5mod
 
 
 async def run_c5(row, dl):
@@ -110,7 +110,7 @@ async def run_c5(row, dl):
 
 
 # ---- C6 Geo-Anomaly -------------------------------------------------------
-from .c6_geo_anomaly.detector import predict as c6_predict
+from .detectors.c6_geo_anomaly.detector import predict as c6_predict
 
 
 async def run_c6(row, dl):

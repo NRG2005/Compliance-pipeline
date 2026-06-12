@@ -26,8 +26,9 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def _data_dir():
-    """Locate the CSVs: prefer a sibling 'data' dir, else this dir, else cwd."""
+    """Locate the CSVs: prefer the local 'data' dir, else this dir, else cwd."""
     for cand in (
+        os.path.join(_HERE, "data"),               # L2_transaction_monitor/data
         os.path.join(_HERE, "..", "..", ".."),     # repo-root style
         os.path.join(_HERE, "..", ".."),
         _HERE,
