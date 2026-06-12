@@ -18,8 +18,8 @@ Sub-checks:
 """
 
 from datetime import datetime, timedelta
-from models import SubCheckResult
-from thresholds import (
+from .models import SubCheckResult
+from .thresholds import (
     THRESHOLD_PROFILES,
     STRUCTURING_BAND_LOW,
     STRUCTURING_BAND_HIGH,
@@ -346,7 +346,7 @@ async def check_high_value_threshold(
 # Sub-check 6: Credit-line limit-probing (T8, merged into C1)
 # ---------------------------------------------------------------------------
 
-from thresholds import (
+from .thresholds import (
     CREDIT_LINE_PURPOSE_CODES,
     CREDIT_LINE_MIN_COUNT,
     CREDIT_LINE_SMALL_RATIO,

@@ -23,8 +23,8 @@ USAGE:
 import time
 from datetime import datetime
 
-from models import TransactionPayload, T1Result
-from checks import (
+from .models import TransactionPayload, T1Result
+from .checks import (
     check_count_velocity,
     check_amount_band_structuring,
     check_same_beneficiary_clustering,
@@ -32,14 +32,14 @@ from checks import (
     check_high_value_threshold,
     check_credit_line_probing,
 )
-from cosmos_client import get_account_baseline, get_rolling_transactions
-from thresholds import T1_WEIGHTS, SLM_REASONING_THRESHOLD, HIGH_VALUE_THRESHOLD_INR
+from .cosmos_client import get_account_baseline, get_rolling_transactions
+from .thresholds import T1_WEIGHTS, SLM_REASONING_THRESHOLD, HIGH_VALUE_THRESHOLD_INR
 
 # --- NEW: Phi-4-mini SLM reasoner ---
 # Import is wrapped in try/except so the pipeline still runs if slm_reasoner.py
 # is not yet present (e.g. during initial setup or if SLM is disabled).
 try:
-    from slm_reasoner import run_slm_reasoning
+    from .slm_reasoner import run_slm_reasoning
     SLM_AVAILABLE = True
 except ImportError:
     SLM_AVAILABLE = False
@@ -278,3 +278,21 @@ async def run_t1(event_payload: dict) -> dict:
     )
 
     return result.model_dump()
+
+
+async def check_velocity_and_structuring(transaction_data, rail=None, threshold=None):
+    """
+    L2-aggregator entry point (the name main.py imports). Wraps `run_t1` and
+    returns its result dict; the aggregator reads `composite_score` from it.
+    Degrades to a non-firing result when the payload or baseline data is
+    insufficient, so the L2 unit keeps running.
+    """
+    try:
+        return await run_t1(transaction_data)
+    except Exception as exc:
+        return {
+            "check": "C1_VELOCITY_STRUCTURING",
+            "composite_score": 0.0,
+            "status": "INSUFFICIENT_DATA",
+            "detail": f"{type(exc).__name__}: {exc}",
+        }

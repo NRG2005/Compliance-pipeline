@@ -30,8 +30,9 @@ from collections import defaultdict
 try:
     import requests
 except ImportError:
-    print("ERROR: 'requests' is required. Install:  pip3 install requests", file=sys.stderr)
-    sys.exit(2)
+    # `requests` is only needed for the live-Ollama judge. The L2 aggregator
+    # path uses the mock judge, so don't crash the import if it's absent.
+    requests = None
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 

@@ -17,7 +17,7 @@ SWITCHING BETWEEN MOCK AND REAL:
 """
 
 import json
-from thresholds import SLM_REASONING_THRESHOLD
+from .thresholds import SLM_REASONING_THRESHOLD
 
 # ---------------------------------------------------------------------------
 # Toggle this to switch between mock and real Phi-4-mini
