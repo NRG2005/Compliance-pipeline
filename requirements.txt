@@ -1,3 +1,17 @@
 pydantic
 pandas
 openpyxl
+azure-functions
+azure-servicebus
+azure-cosmos
+azure-identity
+azure-storage-blob
+azure-storage-queue
+datasketch
+langgraph
+python-dotenv
+rapidfuzz
+rank-bm25
+httpx
+jinja2
+lxml
