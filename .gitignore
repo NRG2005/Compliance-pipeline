@@ -26,3 +26,9 @@ htmlcov/
 # Ignore sensitive information
 local.settings.json
 .env
+
+#Ignore the datasets
+data/
+
+#Ignore metrics report for t1
+baseline_metrics_report.json
