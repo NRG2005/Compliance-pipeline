@@ -1,39 +1,239 @@
-"""
-L1: Orchestrator
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-Uses LangGraph to create a stateful graph that represents the pipeline's flow.
-It decides whether to short-circuit or proceed with the full analysis.
-"""
-from L2_transaction_monitor import main as l2_main
-from L3_regulation_interpreter import main as l3_main
-from L6_audit_logger import main as l6_main
-from .minhash_lsh import find_similar_case
-from .regulation_hash import check_regulation_hash
+import asyncio
+import uuid
+import logging
+import datetime
+from config import get_config
+from L0_event_ingestion.event_receiver import (
+    receive_message, delete_message, get_queue_length
+)
+from L1_orchestrator.minhash_lsh import (
+    query_case_memory, build_feature_set, store_case
+)
+from L1_orchestrator.regulation_hash import get_current_hash, is_stale
 
-async def handle_event(event):
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [L1] %(levelname)s %(message)s"
+)
+log = logging.getLogger(__name__)
+config = get_config()
+
+
+def build_initial_state(tx: dict) -> dict:
     """
-    Main entry point for the orchestrator.
+    Builds the CaseState object that flows through all pipeline layers.
+    Field names match what L2's transaction_monitor() and downstream
+    layers expect.
     """
-    # 1. Check case memory
-    similar_case = find_similar_case(event)
+    return {
+        # Core identifiers
+        "tx_id":             tx["tx_id"],
+        "case_id":           str(uuid.uuid4()),
+        "tx_payload":        tx,
+        "pipeline_start_ts": datetime.datetime.utcnow().isoformat() + "Z",
 
-    if similar_case:
-        # 2. If similar case found, check if regulation has changed
-        is_stale = check_regulation_hash(similar_case['rule_hash'])
-        if not is_stale:
-            # Short-circuit to L6
-            print("L1: Case memory hit and rule unchanged. Short-circuiting to L6.")
-            await l6_main.log_transaction(event, similar_case['verdict'])
-            return
+        # Audit chain — genesis block added here, each layer appends
+        "audit_blocks": [{
+            "block_index": 0,
+            "layer":       "L0",
+            "tx_id":       tx["tx_id"],
+            "timestamp":   tx.get("timestamp", ""),
+            "data":        {"tx_payload": tx},
+            "prev_hash":   None,
+        }],
 
-    # 3. Full pipeline execution
-    print("L1: No case memory match or rule changed. Executing full pipeline.")
-    suspicion_score = await l2_main.transaction_monitor(event)
-    
-    if suspicion_score < 0.7: # Example threshold
-        print("L1: Score below threshold. Logging as clear.")
-        await l6_main.log_transaction(event, "clear")
+        # L1 routing fields
+        "memory_match":            None,
+        "memory_similarity_score": None,
+        "regulation_hash_current": None,
+        "regulation_hash_cached":  None,
+        "regulation_stale":        None,
+        "short_circuit":           False,
+        "route":                   None,
+
+        # L2 fields — populated by transaction_monitor()
+        "suspicion_score":  None,
+        "composite_score":  None,
+        "triggers_fired":   None,
+        "evidence":         None,
+
+        # L3 fields — populated by regulation interpreter
+        "confidence":       None,
+        "confidence_band":  None,
+        "verdict":          None,
+        "citation_trail":   None,
+
+        # L4 fields
+        "xml_path":         None,
+        "xml_valid":        None,
+
+        # L5 fields
+        "reviewer_decision": None,
+        "reviewer_id":       None,
+
+        # Final outcome
+        "final_status":      None,
+        "pipeline_end_ts":   None,
+    }
+
+
+def run_l1_routing(state: dict) -> dict:
+    """
+    Core L1 logic — case memory check + regulation freshness check.
+    Sets state['route'] to either 'l2' or 'l6_short_circuit'.
+    """
+    tx = state["tx_payload"]
+
+    # Step 1 — check case memory for similar past transaction
+    match = query_case_memory(tx)
+    state["memory_match"]            = match
+    state["memory_similarity_score"] = (
+        match.get("_similarity_score") if match else None
+    )
+
+    # Step 2 — check regulation freshness
+    current_hash = get_current_hash()
+    cached_hash  = match.get("regulation_version_hash") if match else None
+    stale        = is_stale(cached_hash, current_hash)
+
+    state["regulation_hash_current"] = current_hash
+    state["regulation_hash_cached"]  = cached_hash
+    state["regulation_stale"]        = stale
+
+    # Step 3 — routing decision
+    if match and not stale:
+        # Memory hit + regulation unchanged → skip L2+L3, go straight to audit
+        state["short_circuit"] = True
+        state["route"]         = "l6_short_circuit"
+        state["final_status"]  = "AUDIT_ONLY"
+        log.info(
+            f"SHORT-CIRCUIT: {tx['tx_id']} matched {match.get('tx_id')} "
+            f"(similarity={state['memory_similarity_score']:.3f}, "
+            f"hash_unchanged=True)"
+        )
     else:
-        print("L1: Score above threshold. Proceeding to L3 for legal reasoning.")
-        await l3_main.interpret_regulation(event, suspicion_score)
+        state["short_circuit"] = False
+        state["route"]         = "l2"
+        reason = "no memory match" if not match else "regulation hash changed"
+        log.info(f"FULL PIPELINE: {tx['tx_id']} ({reason})")
 
+    # Append L1 audit block
+    state["audit_blocks"].append({
+        "block_index": 1,
+        "layer":       "L1",
+        "tx_id":       tx["tx_id"],
+        "timestamp":   datetime.datetime.utcnow().isoformat() + "Z",
+        "data": {
+            "case_id":                 state["case_id"],
+            "short_circuit":           state["short_circuit"],
+            "route":                   state["route"],
+            "memory_match_tx_id":      match.get("tx_id") if match else None,
+            "memory_similarity_score": state["memory_similarity_score"],
+            "regulation_hash_current": current_hash,
+            "regulation_hash_cached":  cached_hash,
+        },
+        "prev_hash": None,
+    })
+
+    return state
+
+
+async def call_l2(state: dict) -> dict:
+    """
+    Calls L2 transaction_monitor with the raw transaction payload.
+    L2 runs its 6 parallel checks and returns a suspicion score.
+
+    Once Person B merges feature/intergation_all, uncomment the
+    real import and remove the placeholder block.
+    """
+    tx = state["tx_payload"]
+
+    try:
+         from L2_transaction_monitor.main import transaction_monitor
+         suspicion_score = await transaction_monitor(tx)
+         state["suspicion_score"] = suspicion_score
+         state["composite_score"] = suspicion_score
+
+    except Exception as e:
+        log.error(f"L2 call failed for {tx['tx_id']}: {e}")
+        state["suspicion_score"] = None
+
+    return state
+
+
+async def handle_event(tx: dict) -> dict:
+    """
+    Main entry point — called by main.py for each transaction.
+    Builds state, runs L1 routing, calls L2 if needed.
+    """
+    state = build_initial_state(tx)
+    state = run_l1_routing(state)
+
+    if state["route"] == "l2":
+        state = await call_l2(state)
+    elif state["route"] == "l6_short_circuit":
+        log.info(f"Short-circuit to L6: {tx['tx_id']}")
+        # L6 audit call will go here once L6 is implemented
+
+    # Store completed case in memory for future short-circuit matching
+    store_case(state)
+
+    log.info(
+        f"DONE: {tx['tx_id']} → "
+        f"route={state['route']} | "
+        f"short_circuit={state['short_circuit']}"
+    )
+    return state
+
+
+async def process_queue(max_messages: int = 10) -> list:
+    """
+    Reads up to max_messages from the L0 queue and processes
+    each through L1. Returns list of completed CaseState dicts.
+    """
+    results   = []
+    processed = 0
+
+    log.info(f"Queue length: {get_queue_length()}")
+
+    while processed < max_messages:
+        result = receive_message()
+        if not result:
+            log.info("Queue empty.")
+            break
+
+        msg, tx = result
+        try:
+            state = await handle_event(tx)
+            delete_message(msg)
+            results.append(state)
+            processed += 1
+        except Exception as e:
+            log.error(f"Error processing {tx.get('tx_id','?')}: {e}")
+
+    # Summary
+    short_circuits = sum(1 for r in results if r["short_circuit"])
+    full_pipeline  = sum(1 for r in results if not r["short_circuit"])
+    log.info(
+        f"Processed {processed} messages — "
+        f"short-circuit: {short_circuits} | "
+        f"full pipeline: {full_pipeline}"
+    )
+    return results
+
+
+if __name__ == "__main__":
+    results = asyncio.run(process_queue(max_messages=2000))
+    print(f"\n{'='*50}")
+    print(f"Processed {len(results)} transactions")
+    print(f"{'='*50}")
+    for r in results:
+        print(
+            f"  {r['tx_id']:<25} "
+            f"route={r['route']:<20} "
+            f"short_circuit={r['short_circuit']}"
+        )

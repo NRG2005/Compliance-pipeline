@@ -15,3 +15,4 @@ rank-bm25
 httpx
 jinja2
 lxml
+httpx       

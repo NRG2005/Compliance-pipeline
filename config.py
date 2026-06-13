@@ -47,6 +47,16 @@ class Config:
     L2_ENDPOINT = os.environ.get("L2_ENDPOINT", "http://localhost:8002/process")
     L6_ENDPOINT = os.environ.get("L6_ENDPOINT", "http://localhost:8006/log")
 
+    #Dataset file paths
+    TRANSACTIONS_CSV   = "data/transactions.csv"
+    ACCOUNTS_CSV       = "data/accounts.csv"        
+    WATCHLIST_CSV      = "data/watchlist.csv"
+    CASE_HISTORY_CSV   = "data/case_history.csv"    
+    GROUND_TRUTH_CSV   = "data/ground_truth.csv"
+
+    # New channel added in dataset
+    VALID_CHANNELS = {"UPI", "NEFT", "RTGS", "IMPS", "SWIFT"} 
+
 
 class DevelopmentConfig(Config):
     DEBUG = True
