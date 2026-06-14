@@ -5,3 +5,16 @@ azure-search-documents==11.4.0
 azure-core
 azure-storage-blob
 chromadb
+azure-functions
+azure-servicebus
+azure-cosmos
+azure-identity
+azure-storage-queue
+datasketch
+langgraph
+python-dotenv
+rapidfuzz
+rank-bm25
+httpx
+jinja2
+lxml
