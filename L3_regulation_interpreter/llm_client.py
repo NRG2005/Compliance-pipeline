@@ -10,9 +10,8 @@ from typing import Any, Dict, List
 from urllib import request
 from urllib.error import HTTPError
 
-from config import load_project_env
-
-load_project_env()
+from dotenv import load_dotenv
+load_dotenv()
 
 
 def is_llm_configured() -> bool:
@@ -156,6 +155,37 @@ def _call_ollama(
     except (json.JSONDecodeError, ValueError) as exc:
         print(f"L3: Ollama response was not valid JSON: {exc}")
         return {"raw_response": raw_text, "error": "ollama_json_parse_failed"}
+
+
+def generate_ollama_embedding(text: str) -> List[float]:
+    """Generates an embedding vector using local Ollama model."""
+    ollama_base = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+    model = "nomic-embed-text"
+    
+    import re
+    # Strip corrupted PDF unicode (like \ufffd) and non-ASCII characters (like Hindi headers)
+    # which cause the Ollama nomic-embed-text tokenizer to throw an HTTP 500.
+    clean_text = text.replace('\ufffd', ' ')
+    clean_text = re.sub(r'[^\x00-\x7F]+', ' ', clean_text)
+    
+    payload = {
+        "model": model,
+        "prompt": clean_text
+    }
+    
+    try:
+        req = request.Request(
+            f"{ollama_base.rstrip('/')}/api/embeddings",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with request.urlopen(req, timeout=60) as response:
+            raw_payload = json.loads(response.read().decode("utf-8"))
+            return raw_payload.get("embedding", [])
+    except Exception as exc:
+        print(f"L3: Ollama embedding failed: {exc}")
+        return []
 
 
 def chat_json(

@@ -1,3 +1,7 @@
 pydantic
 pandas
 openpyxl
+azure-search-documents==11.4.0
+azure-core
+azure-storage-blob
+chromadb

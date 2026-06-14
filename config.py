@@ -24,7 +24,7 @@ class Config:
     # Azure AI Search
     SEARCH_ENDPOINT = os.environ.get("SEARCH_ENDPOINT")
     SEARCH_API_KEY = os.environ.get("SEARCH_API_KEY")
-    SEARCH_INDEX_NAME = "regulations"
+    SEARCH_INDEX_NAME = "compliance-regulations"
 
     # Azure AI Document Intelligence
     DOC_INTELLIGENCE_ENDPOINT = os.environ.get("DOC_INTELLIGENCE_ENDPOINT")
