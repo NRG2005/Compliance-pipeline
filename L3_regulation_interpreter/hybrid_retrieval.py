@@ -251,85 +251,39 @@ def search_regulations(
     top_k: int = DEFAULT_TOP_K,
 ) -> Dict[str, Any]:
     """
-    Performs hybrid retrieval using Azure AI Search (Vector + Keyword) as primary,
-    and falls back to local ChromaDB if Azure fails.
+    Performs dual-retrieval using Azure AI Search (Hybrid) and local ChromaDB (Vector).
+    Returns both sets of chunks for dual LLM evaluation.
     """
     query = build_search_query(event)
     from L3_regulation_interpreter.llm_client import generate_ollama_embedding
     
+    azure_chunks = []
+    local_chunks = []
+    
     try:
         query_vector = generate_ollama_embedding(query.get("query_text", ""))
         if not query_vector:
-            return {"query": query, "retrieval_match": 0.0, "chunks": [], "backend": "failed"}
+            return {"query": query, "retrieval_match": 0.0, "chunks": [], "nomic_chunks": [], "backend": "failed"}
             
-        print("L3: Searching for relevant regulations via Azure AI Search...")
-        from azure.core.credentials import AzureKeyCredential
-        from azure.search.documents import SearchClient
-        from azure.search.documents.models import VectorizedQuery
+        print("L3: Searching for relevant regulations via Azure AI Search and Local ChromaDB...")
         
-        endpoint = os.environ.get("SEARCH_ENDPOINT")
-        key = os.environ.get("SEARCH_API_KEY")
-        index_name = "compliance-regulations"
-        
-        if not endpoint or not key:
-            raise ValueError("Missing Azure credentials")
-            
-        credential = AzureKeyCredential(key)
-        search_client = SearchClient(endpoint=endpoint, index_name=index_name, credential=credential)
-        
-        vector_query = VectorizedQuery(vector=query_vector, k_nearest_neighbors=top_k, fields="content_vector")
-        
-        results = search_client.search(
-            search_text=query.get("query_text", ""), # Hybrid search (keyword + vector)
-            vector_queries=[vector_query],
-            select=["chunk_id", "document_id", "title", "content", "section_heading"],
-            top=top_k
-        )
-        
-        top_chunks = []
-        for result in results:
-            score = result["@search.score"]
-            top_chunks.append({
-                "chunk_id": result.get("chunk_id"),
-                "document_id": result.get("document_id"),
-                "title": result.get("title"),
-                "content": result.get("content"),
-                "section_heading": result.get("section_heading", ""),
-                "retrieval_score": round(score, 4),
-            })
-            
-        retrieval_match = _compute_retrieval_match(top_chunks)
-        
-        return {
-            "query": query,
-            "retrieval_match": retrieval_match,
-            "chunks": top_chunks,
-            "backend": "azure_ai_search_hybrid"
-        }
-        
-    except Exception as azure_exc:
-        print(f"L3: Azure AI Search failed ({azure_exc}). Falling back to local ChromaDB...")
+        # 1. Local ChromaDB Search
         try:
             import chromadb
             client = chromadb.PersistentClient(path="chroma_db")
-            collection = client.get_or_create_collection(
-                name="compliance_regulations",
-                metadata={"hnsw:space": "cosine"}
-            )
+            collection = client.get_collection("compliance_regulations")
             
-            # Chroma vector search
             results = collection.query(
                 query_embeddings=[query_vector],
                 n_results=top_k
             )
             
-            top_chunks = []
             if results and results["documents"] and len(results["documents"][0]) > 0:
                 for i in range(len(results["documents"][0])):
                     distance = results["distances"][0][i]
                     similarity = 1.0 - (distance / 2.0)
                     
-                    top_chunks.append({
+                    local_chunks.append({
                         "chunk_id": results["ids"][0][i],
                         "document_id": results["metadatas"][0][i].get("document_id", ""),
                         "title": results["metadatas"][0][i].get("title", ""),
@@ -337,14 +291,55 @@ def search_regulations(
                         "section_heading": results["metadatas"][0][i].get("section_heading", ""),
                         "retrieval_score": round(similarity, 4),
                     })
-                    
-            retrieval_match = _compute_retrieval_match(top_chunks)
-            return {
-                "query": query,
-                "retrieval_match": retrieval_match,
-                "chunks": top_chunks,
-                "backend": "chromadb_local_fallback"
-            }
         except Exception as local_exc:
-            print(f"L3: Both Azure and ChromaDB failed. Vector Search offline: {local_exc}")
-            return {"query": query, "retrieval_match": 0.0, "chunks": [], "backend": "failed"}
+            print(f"L3: Local ChromaDB vector search failed: {local_exc}")
+            
+        # 2. Azure AI Search
+        try:
+            from azure.core.credentials import AzureKeyCredential
+            from azure.search.documents import SearchClient
+            from azure.search.documents.models import VectorizedQuery
+            
+            endpoint = os.environ.get("SEARCH_ENDPOINT")
+            key = os.environ.get("SEARCH_API_KEY")
+            index_name = "compliance-regulations"
+            
+            if endpoint and key:
+                credential = AzureKeyCredential(key)
+                search_client = SearchClient(endpoint=endpoint, index_name=index_name, credential=credential)
+                
+                vector_query = VectorizedQuery(vector=query_vector, k_nearest_neighbors=top_k, fields="content_vector")
+                
+                results = search_client.search(
+                    search_text=query.get("query_text", ""), # Hybrid search
+                    vector_queries=[vector_query],
+                    select=["chunk_id", "document_id", "title", "content", "section_heading"],
+                    top=top_k
+                )
+                
+                for result in results:
+                    score = result["@search.score"]
+                    azure_chunks.append({
+                        "chunk_id": result.get("chunk_id"),
+                        "document_id": result.get("document_id"),
+                        "title": result.get("title"),
+                        "content": result.get("content"),
+                        "section_heading": result.get("section_heading", ""),
+                        "retrieval_score": round(score, 4),
+                    })
+        except Exception as azure_exc:
+            print(f"L3: Azure AI Search failed: {azure_exc}")
+            
+        retrieval_match = _compute_retrieval_match(azure_chunks if azure_chunks else local_chunks)
+        
+        return {
+            "query": query,
+            "retrieval_match": retrieval_match,
+            "chunks": azure_chunks,
+            "nomic_chunks": local_chunks,
+            "backend": "dual_retrieval"
+        }
+        
+    except Exception as exc:
+        print(f"L3: Embedding generation failed: {exc}")
+        return {"query": query, "retrieval_match": 0.0, "chunks": [], "nomic_chunks": [], "backend": "failed"}

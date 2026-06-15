@@ -142,26 +142,63 @@ def run_l1_routing(state: dict) -> dict:
     return state
 
 
+# Global DataLayer for L2
+_dl = None
+
 async def call_l2(state: dict) -> dict:
     """
     Calls L2 transaction_monitor with the raw transaction payload.
     L2 runs its 6 parallel checks and returns a suspicion score.
-
-    Once Person B merges feature/intergation_all, uncomment the
-    real import and remove the placeholder block.
     """
     tx = state["tx_payload"]
 
     try:
-         from L2_transaction_monitor.main import transaction_monitor
-         suspicion_score = await transaction_monitor(tx)
-         state["suspicion_score"] = suspicion_score
-         state["composite_score"] = suspicion_score
+         global _dl
+         from L2_transaction_monitor.orchestrator import monitor
+         from L2_transaction_monitor.data_layer import DataLayer
+         
+         if _dl is None:
+             _dl = DataLayer()
+
+         # The new L2 orchestrator expects the row and the DataLayer
+         l2_result = await monitor(tx, _dl)
+         
+         state["suspicion_score"] = l2_result["suspicion_score"]
+         state["composite_score"] = l2_result["suspicion_score"]
+         state["triggers_fired"]  = l2_result["triggers"]
+         
+         # Inject into tx so L3 can use them!
+         tx["l2_suspicion_score"] = state["suspicion_score"]
+         tx["l2_triggers_fired"] = state["triggers_fired"]
 
     except Exception as e:
         log.error(f"L2 call failed for {tx['tx_id']}: {e}")
         state["suspicion_score"] = None
 
+    return state
+
+
+async def call_l3(state: dict) -> dict:
+    """
+    Calls L3 regulation_interpreter.
+    Runs retrieval and analysis, and populates verdict and citations.
+    """
+    tx = state["tx_payload"]
+    try:
+        from L3_regulation_interpreter.hybrid_retrieval import search_regulations
+        from L3_regulation_interpreter.legal_reasoning import generate_legal_analysis
+        
+        retrieval = search_regulations(tx)
+        analysis = generate_legal_analysis(tx, retrieval)
+        
+        state["confidence"] = analysis.get("final_score")
+        state["verdict"] = analysis.get("verdict")
+        state["citation_trail"] = analysis.get("citation_trail")
+    except Exception as e:
+        log.error(f"L3 call failed for {tx['tx_id']}: {e}")
+        state["verdict"] = "error"
+        state["confidence"] = 0.0
+        
     return state
 
 
@@ -175,6 +212,16 @@ async def handle_event(tx: dict) -> dict:
 
     if state["route"] == "l2":
         state = await call_l2(state)
+        
+        # Route to L3 if L2 flagged it
+        if state["suspicion_score"] is not None and state["suspicion_score"] > 0.0:
+            log.info(f"L2 scored {state['suspicion_score']}. Routing to L3 for legal analysis.")
+            state = await call_l3(state)
+        else:
+            state["verdict"] = "clear"
+            state["confidence"] = 1.0
+            state["citation_trail"] = []
+            
     elif state["route"] == "l6_short_circuit":
         log.info(f"Short-circuit to L6: {tx['tx_id']}")
         # L6 audit call will go here once L6 is implemented

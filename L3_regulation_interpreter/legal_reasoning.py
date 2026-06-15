@@ -104,30 +104,68 @@ Final score MUST reflect the weighted legal confidence after reasoning.
 If the rules are weakly related or evidence is thin, lower the score.
 """.strip()
 
-def generate_legal_analysis(event, regulation_chunks):
+def generate_legal_analysis(event, retrieval):
     """
     Uses a large language model to analyze the transaction against the retrieved regulations.
+    Performs Dual-Evaluation: runs LLM independently on Azure AI Search chunks and Local Nomic chunks,
+    and returns the verdict with the highest confidence score.
     """
-    print("L3: Applying legal reasoning...")
+    print("L3: Applying dual legal reasoning (Azure AI vs Local Nomic)...")
 
-    fallback_reason = "GEMINI_API_KEY is not configured."
+    azure_chunks = retrieval.get("chunks", [])
+    nomic_chunks = retrieval.get("nomic_chunks", [])
+    
+    azure_analysis = None
+    nomic_analysis = None
+    
+    fallback_reason = "LLM not configured."
     if is_llm_configured():
+        # Evaluate Azure Chunks
         try:
-            return chat_json(
-                system_prompt=SYSTEM_PROMPT,
-                user_prompt=_build_reasoning_prompt(event, regulation_chunks),
-            )
+            if azure_chunks:
+                azure_analysis = chat_json(
+                    system_prompt=SYSTEM_PROMPT,
+                    user_prompt=_build_reasoning_prompt(event, azure_chunks),
+                )
+                azure_analysis["backend_used"] = "azure_ai_search"
         except Exception as exc:
-            print(f"L3: GPT legal reasoning fallback triggered: {exc}")
-            fallback_reason = str(exc)
+            print(f"L3: Azure evaluation failed: {exc}")
+            
+        # Evaluate Local Nomic Chunks
+        try:
+            if nomic_chunks:
+                nomic_analysis = chat_json(
+                    system_prompt=SYSTEM_PROMPT,
+                    user_prompt=_build_reasoning_prompt(event, nomic_chunks),
+                )
+                nomic_analysis["backend_used"] = "local_nomic_search"
+        except Exception as exc:
+            print(f"L3: Local Nomic evaluation failed: {exc}")
+            
+    # Determine the winner (highest final_score)
+    winner = None
+    if azure_analysis and nomic_analysis:
+        if float(nomic_analysis.get("final_score", 0)) > float(azure_analysis.get("final_score", 0)):
+            print(f"L3 Dual-Eval: Local Nomic model scored higher confidence ({nomic_analysis.get('final_score')} vs {azure_analysis.get('final_score')}). Using Local!")
+            winner = nomic_analysis
+        else:
+            print(f"L3 Dual-Eval: Azure model scored higher or equal confidence. Using Azure!")
+            winner = azure_analysis
+    elif azure_analysis:
+        winner = azure_analysis
+    elif nomic_analysis:
+        winner = nomic_analysis
+        
+    if winner:
+        return winner
 
-    top_chunk = regulation_chunks[0] if regulation_chunks else {}
-    analysis = {
-        "retrieval_match": 0.95,
-        "rule_applicability": 0.92,
-        "evidence_sufficiency": 0.88,
-        "precedent_confidence": 0.85,
+    print("L3: Fallback triggered.")
+    return {
+        "retrieval_match": 0.0,
+        "rule_applicability": 0.0,
+        "evidence_sufficiency": 0.0,
+        "precedent_confidence": 0.0,
         "citation_trail": f"Fallback: {fallback_reason}",
-        "final_score": 0.90 # Weighted average of sub-scores
+        "final_score": 0.0,
+        "verdict": "review"
     }
-    return analysis
