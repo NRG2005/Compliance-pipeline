@@ -49,10 +49,36 @@ WEIGHTS = {
 
 # ---- C1 Velocity & Structuring -------------------------------------------
 from .detectors import c1_adapter
+from .detectors.c1_velocity_and_structuring import slm_reasoner as c1_slm
 
 
 async def run_c1(row, dl):
-    return c1_adapter.evaluate_row(row, dl)
+    res = c1_adapter.evaluate_row(row, dl)
+    if not res["fired"]:
+        return res
+    # phi4 reviews the fired velocity/structuring pattern (C1's designed
+    # reasoning role) and can deprioritise a clear false positive (e.g. salary
+    # disbursement). Any failure / sub-threshold score leaves the fire intact.
+    try:
+        tx_payload = {
+            "tx_id": row.get("tx_id"),
+            "amount_inr": _f(row.get("amount_inr")),
+            "purpose_code": row.get("purpose_code", ""),
+            "receiver_name": row.get("receiver_name", ""),
+            "channel": row.get("channel", ""),
+        }
+        reasoning = await c1_slm.run_slm_reasoning(
+            tx_payload, res.get("evidence", {}), res["score"], [res["trigger"]]
+        )
+        if (
+            reasoning
+            and reasoning.get("false_positive_likelihood") == "HIGH"
+            and reasoning.get("recommended_action") == "DEPRIORITISE"
+        ):
+            return {"fired": False, "score": 0.0, "trigger": None}
+    except Exception:
+        pass
+    return res
 
 
 # ---- C2 Sanctions & Watchlist --------------------------------------------
@@ -90,7 +116,9 @@ from .detectors import c3_graph_network_flow as c3mod
 
 
 async def run_c3(row, dl):
-    return c3mod.evaluate_row(row, dl)
+    # phi4 is the authoritative C3 classifier on every case; the deterministic
+    # graph rules supply the score magnitude and the automatic fallback.
+    return c3mod.evaluate_row_slm(row, dl)
 
 
 # ---- C4 Account Risk & Dormancy ------------------------------------------
@@ -98,7 +126,15 @@ from .detectors import c4_account_risk_and_dormancy as c4mod
 
 
 async def run_c4(row, dl):
-    return c4mod.evaluate_row(row, dl)
+    res = c4mod.evaluate_row(row, dl)
+    if not res["fired"]:
+        return res
+    # phi4 confirms or vetoes the fired dormancy / new-account case in context.
+    acc = dl.account_for(row.get("sender_account_id", ""))
+    verdict = c4mod.slm_confirm(acc, res["trigger"], _f(row.get("amount_inr")))
+    if verdict["label"] == "NORMAL":
+        return {"fired": False, "score": 0.0, "trigger": None}
+    return res
 
 
 # ---- C5 Cross-Border / FEMA-LRS ------------------------------------------
@@ -111,6 +147,7 @@ async def run_c5(row, dl):
 
 # ---- C6 Geo-Anomaly -------------------------------------------------------
 from .detectors.c6_geo_anomaly.detector import predict as c6_predict
+from .detectors.c6_geo_anomaly import slm_classifier as c6_slm
 
 
 async def run_c6(row, dl):
@@ -120,54 +157,47 @@ async def run_c6(row, dl):
     ah = c6_account_history(acc, hist, dl)
     out = c6_predict(c6_transaction(row), ah)
     f = out["evidence"]["features"]
-    fired = out["fired"]
-    score = out["score"]
 
-    # --- Travel-profile gate (precision) ---------------------------------
-    # A new/foreign location is legitimate when the account's travel profile
-    # explains it AND the device is unchanged. Genuine fraud here always brings
-    # a NEW device, an impossible jump, a FATF jurisdiction, or a balance drain;
-    # none of those are gated away.
-    profile = (acc.get("travel_profile") or "DOMESTIC_STATIC").upper()
-    device_unchanged = not f.get("is_new_device")
-    benign_signals_only = (
-        not f.get("is_new_device")
-        and not f.get("impossible_travel")
-        and not f.get("is_fatf_high_risk")
-        and not f.get("is_balance_drain")
+    # "Signals present" pre-gate (perf): C6 is SUSPICIOUS only if a geo/device
+    # trigger fires, and every trigger is a subset of these anomaly flags. If a
+    # transaction sets NONE of them it is vanilla — phi4 would trivially say
+    # NORMAL — so skip the call. Recall is preserved: any transaction with even
+    # one anomaly signal still goes to phi4 for the contextual judgement.
+    anomaly_present = (
+        f.get("is_new_location") or f.get("is_rare_location") or f.get("is_foreign")
+        or f.get("is_fatf_high_risk") or f.get("impossible_travel")
+        or f.get("is_new_device") or f.get("is_balance_drain") or f.get("is_odd_hour")
     )
-    if device_unchanged and benign_signals_only:
-        if profile in ("DOMESTIC_TRAVELLER", "INTERNATIONAL_FREQUENT") or (
-            f.get("is_foreign") and profile != "DOMESTIC_STATIC"
-        ):
-            fired, score = False, 0.0
-        # Domestic-static account, foreign vacation on the SAME device: a single
-        # foreign-country signal alone (no device/impossible/FATF/drain) is not
-        # enough to flag — matches the vacation_foreign_legit control cases.
-        elif f.get("is_foreign") and not f.get("is_new_location"):
-            fired, score = False, 0.0
-        elif f.get("is_foreign"):
-            fired, score = False, 0.0
+    if not anomaly_present:
+        return {"fired": False, "score": 0.0, "trigger": None}
 
-    # --- Subtle device-probe rescue (recall) -----------------------------
-    # A transaction on a NEW device for an otherwise-quiet account is the
-    # account-takeover probe signature even when the amount is tiny (so the
-    # noisy-OR score sits just under threshold). A new device is decisive.
-    if not fired and f.get("is_new_device"):
-        fired, score = True, max(score, 0.55)
+    # phi4 is the authoritative C6 classifier for every case that has a signal:
+    # it reasons over the SAME features the deterministic detector measured and
+    # decides SUSPICIOUS vs NORMAL using context (NRE account, frequent
+    # traveller, one-off purchase) that the old hardcoded travel-profile gates
+    # approximated. classify() falls back to the transparent reference reasoner
+    # if Ollama is unreachable.
+    verdict = c6_slm.classify(f)
+    fired = verdict["label"] == 1
+    if not fired:
+        return {"fired": False, "score": 0.0, "trigger": None}
 
-    trig = None
-    if fired:
-        if f.get("impossible_travel"):
-            trig = "C6_impossible_travel"
-        elif f.get("is_fatf_high_risk"):
-            trig = "C6_jurisdiction"
-        elif f.get("is_balance_drain") and f.get("is_new_device"):
-            trig = "C6_takeover"
-        elif f.get("is_new_device"):
-            trig = "C6_newloc_newdev" if f.get("is_new_location") else "C6_subtle_probe"
-        else:
-            trig = "C6_newloc_newdev"
+    # Deterministic noisy-OR supplies the score magnitude; phi4 confidence backs
+    # it up when the magnitude is zero (e.g. a subtle new-device probe).
+    score = out["score"] if out["score"] > 0 else round(float(verdict["confidence"]), 4)
+
+    if f.get("impossible_travel"):
+        trig = "C6_impossible_travel"
+    elif f.get("is_fatf_high_risk"):
+        trig = "C6_jurisdiction"
+    elif f.get("is_balance_drain") and f.get("is_new_device"):
+        trig = "C6_takeover"
+    elif f.get("is_new_device"):
+        trig = "C6_newloc_newdev" if f.get("is_new_location") else "C6_subtle_probe"
+    elif f.get("is_foreign"):
+        trig = "C6_foreign"
+    else:
+        trig = "C6_geo"
     return {"fired": fired, "score": score, "trigger": trig}
 
 

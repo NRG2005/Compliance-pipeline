@@ -234,3 +234,114 @@ def evaluate_row(row, dl):
     if rt_fired:
         return {"fired": True, "score": rt_score, "trigger": "C3_roundtrip"}
     return {"fired": False, "score": 0.0, "trigger": None}
+
+
+# ===========================================================================
+# phi4-primary path (used by orchestrator.py when phi4 is the authoritative
+# C3 classifier). Builds the SAME fan-in/out + round-trip feature dicts the
+# standalone slm_classifier expects, then lets phi4 classify EVERY case. The
+# deterministic evaluate_row above supplies the score magnitude and is the
+# automatic fallback (slm_classifier.classify() itself falls back to the
+# transparent reference reasoner if Ollama is unreachable).
+# ===========================================================================
+
+def _fan_features(nodes, dl):
+    """Build the fan-in/out feature dict slm_classifier.classify() expects."""
+    if not nodes:
+        return {"inbound_count": 0, "distinct_vpas": 0, "all_under_5k": False,
+                "fanout_within_window": False, "outbound_ratio": 0.0,
+                "trigger_account": None, "account_type": None,
+                "account_age_days": None, "is_registered_merchant": False}
+    collector = max(nodes, key=lambda n: len(dl.tx_in.get(n, [])))
+    inbound = dl.tx_in.get(collector, [])
+    outbound = dl.tx_out.get(collector, [])
+    small = [e for e in inbound if _f(e.get("amount_inr")) < FANIN_SMALL_INR]
+    distinct = len({e.get("sender_account_id") for e in small if e.get("sender_account_id")})
+    cum = sum(_f(e.get("amount_inr")) for e in small)
+    sweep = max((_f(e.get("amount_inr")) for e in outbound), default=0.0)
+    ratio = (sweep / cum) if cum > 0 else 0.0
+    acc = dl.account_for(collector)
+    return {
+        "inbound_count": len(small),
+        "distinct_vpas": distinct,
+        "all_under_5k": bool(inbound) and all(_f(e.get("amount_inr")) < FANIN_SMALL_INR for e in inbound),
+        "fanout_within_window": sweep > 0,
+        "outbound_ratio": round(ratio, 4),
+        "trigger_account": collector,
+        "account_type": acc.get("account_type"),
+        "account_age_days": _f(acc.get("account_age_days")),
+        "is_registered_merchant": acc.get("is_registered_merchant") in ("True", "true", True),
+    }
+
+
+def _rt_features(row, dl):
+    """Build the round-trip feature dict slm_classifier.classify() expects."""
+    nums = {_net_num(row.get("sender_account_id")), _net_num(row.get("receiver_account_id"))}
+    nums.discard(None)
+    for k in nums:
+        net_nodes = {a for a in dl.accounts
+                     if _net_num(a) == k and _re.match(r"(RT|INT|RET)\d", a)}
+        if not net_nodes:
+            continue
+        legs = sorted(
+            [r for r in dl.transactions
+             if r.get("sender_account_id") in net_nodes
+             and r.get("receiver_account_id") in net_nodes],
+            key=lambda x: x.get("timestamp", ""),
+        )
+        if len(legs) < 2:
+            continue
+        start = _f(legs[0].get("amount_inr"))
+        end = _f(legs[-1].get("amount_inr"))
+        preservation = (end / start) if start > 0 else 0.0
+        starts_at_rt = (legs[0].get("sender_account_id") or "").startswith("RT")
+        ends_at_ret = (legs[-1].get("receiver_account_id") or "").startswith("RET")
+        if starts_at_rt and ends_at_ret:
+            return {"returns": True, "hop_count": len(legs),
+                    "amount_preservation_ratio": round(preservation, 4),
+                    "shared_attribute": "ifsc_prefix"}
+    return {"returns": False, "hop_count": None,
+            "amount_preservation_ratio": 0.0, "shared_attribute": None}
+
+
+def evaluate_row_slm(row, dl):
+    """phi4-authoritative C3 verdict for one unified row.
+
+    phi4 classifies the graph features on EVERY case; the deterministic
+    evaluate_row supplies the score magnitude. Returns the {fired, score,
+    trigger} contract plus the predictor tag and phi4's reason.
+    """
+    nodes = _cluster_nodes(row, dl)
+    fan = _fan_features(nodes, dl)
+    rt = _rt_features(row, dl)
+
+    # "Signals present" pre-gate (perf): phi4 can only return SUSPICIOUS if a
+    # mule sweep (needs >=3 small inbound credits) or a layering round-trip
+    # (needs a return network) could possibly hold. An ordinary 1-in/1-out
+    # payment has neither, so phi4 would trivially say NORMAL — skip the call.
+    # This preserves recall (every case where either pattern is structurally
+    # possible still goes to phi4) while skipping the vanilla majority.
+    has_fan_structure = fan["inbound_count"] >= 3
+    has_rt_structure = rt["returns"]
+    if not (has_fan_structure or has_rt_structure):
+        return {"fired": False, "score": 0.0, "trigger": None,
+                "predictor": "skipped_no_signal",
+                "reason": "no fan-in cluster or round-trip network"}
+
+    verdict = slm_classifier.classify(fan, rt)
+
+    if verdict["label"] != 1:
+        return {"fired": False, "score": 0.0, "trigger": None,
+                "predictor": verdict["predictor"], "reason": verdict["reason"]}
+
+    det = evaluate_row(row, dl)
+    score = det["score"] if det["score"] > 0 else round(float(verdict["confidence"]), 4)
+    if det["trigger"]:
+        trigger = det["trigger"]
+    elif rt["returns"]:
+        trigger = "C3_roundtrip"
+    else:
+        is_sweep = row.get("sender_account_id") == fan.get("trigger_account")
+        trigger = "C3_sweep" if is_sweep else "C3_fanin"
+    return {"fired": True, "score": score, "trigger": trigger,
+            "predictor": verdict["predictor"], "reason": verdict["reason"]}

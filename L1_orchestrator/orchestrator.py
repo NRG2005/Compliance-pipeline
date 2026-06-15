@@ -26,7 +26,7 @@ config = get_config()
 def build_initial_state(tx: dict) -> dict:
     """
     Builds the CaseState object that flows through all pipeline layers.
-    Field names match what L2's transaction_monitor() and downstream
+    Field names match what L2's monitor() and downstream
     layers expect.
     """
     return {
@@ -55,7 +55,7 @@ def build_initial_state(tx: dict) -> dict:
         "short_circuit":           False,
         "route":                   None,
 
-        # L2 fields — populated by transaction_monitor()
+        # L2 fields — populated by monitor()
         "suspicion_score":  None,
         "composite_score":  None,
         "triggers_fired":   None,
@@ -144,19 +144,57 @@ def run_l1_routing(state: dict) -> dict:
 
 async def call_l2(state: dict) -> dict:
     """
-    Calls L2 transaction_monitor with the raw transaction payload.
-    L2 runs its 6 parallel checks and returns a suspicion score.
+    Calls L2 for one transaction. Two stages, by design:
 
-    Once Person B merges feature/intergation_all, uncomment the
-    real import and remove the placeholder block.
+      1. Deterministic detectors (C1-C6) extract features and surface which
+         categories fire + a weighted suspicion score (fast, no LLM).
+      2. phi-4 (Ollama) is the REASONING layer: it reads those features and
+         returns an authoritative verdict + plain-English reason. C6 is wired
+         today (the owner's SLM detector); C3 slots in once the live path builds
+         a graph_case; C1's SLM needs Cosmos and is left deterministic for now.
+
+    The SLM pass is best-effort: any failure leaves the deterministic result
+    intact so the pipeline never stalls on the LLM.
     """
     tx = state["tx_payload"]
 
     try:
-         from L2_transaction_monitor.main import transaction_monitor
-         suspicion_score = await transaction_monitor(tx)
-         state["suspicion_score"] = suspicion_score
-         state["composite_score"] = suspicion_score
+        from L2_transaction_monitor.data_layer import (
+            DataLayer, c6_account_history, c6_transaction, _parse_ts,
+        )
+        from L2_transaction_monitor.orchestrator import monitor as l2_monitor
+
+        dl = DataLayer()
+
+        # Stage 1 — deterministic categories + weighted score.
+        det = await l2_monitor(tx, dl)
+        state["suspicion_score"] = det["suspicion_score"]
+        state["composite_score"] = det["suspicion_score"]
+        state["triggers_fired"]  = det["triggers"]
+        state["fired_categories"] = det["fired_categories"]
+        evidence = {"per_category": det["per_category"]}
+
+        # Stage 2 — phi-4 reasoning on C6 (Ollama), best-effort.
+        try:
+            from L2_transaction_monitor.detectors.c6_geo_anomaly import run_c6
+            acc  = dl.account_for(tx["sender_account_id"])
+            hist = dl.history_for(tx["sender_account_id"], before_ts=_parse_ts(tx["timestamp"]))
+            ah   = c6_account_history(acc, hist, dl)
+            c6_slm = run_c6(c6_transaction(tx), ah, mode="slm")
+            evidence["c6_slm_reasoning"] = {
+                "verdict":    c6_slm.get("verdict"),
+                "confidence": c6_slm.get("confidence"),
+                "reason":     c6_slm.get("reason"),
+                "predictor":  c6_slm.get("predictor"),
+            }
+        except Exception as slm_exc:
+            log.warning(f"C6 SLM reasoning skipped for {tx['tx_id']}: {slm_exc}")
+
+        state["evidence"] = evidence
+        log.info(
+            f"L2 {tx['tx_id']}: flag={det['flag']} "
+            f"score={det['suspicion_score']} cats={det['fired_categories']}"
+        )
 
     except Exception as e:
         log.error(f"L2 call failed for {tx['tx_id']}: {e}")

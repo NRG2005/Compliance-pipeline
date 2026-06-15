@@ -29,21 +29,37 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 config = get_config()
 
+# Canonical dataset location, resolved relative to the repo root so the publisher
+# works regardless of the current working directory. The CSVs live under
+# L2_transaction_monitor/data/ (there is no top-level data/ folder).
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_DEFAULT_CSV = os.path.join(_REPO_ROOT, "L2_transaction_monitor", "data", "transactions.csv")
+
 
 def get_queue_client() -> QueueClient:
     """Returns an authenticated Queue client — no encode policy, plain JSON."""
+    # Demo safety net: some machines run antivirus/proxy TLS interception (e.g.
+    # Avast HTTPS scanning) whose root cert Python's OpenSSL rejects, breaking
+    # the Azure SDK. Setting AZURE_SSL_VERIFY=0 bypasses cert verification for
+    # this client only. Default (verify on) is unchanged.
+    verify = os.environ.get("AZURE_SSL_VERIFY", "1") != "0"
     return QueueClient.from_connection_string(
         config.AZURE_STORAGE_CONNECTION_STRING,
         config.AZURE_STORAGE_QUEUE_NAME,
+        connection_verify=verify,
     )
 
-def publish_transactions(csv_path: str = "data/transactions.csv") -> dict:
+def publish_transactions(csv_path: str = None, limit: int = None) -> dict:
     """
     Reads transactions.csv and publishes each row as a JSON message
     to the Azure Queue Storage tx-events queue.
 
+    csv_path: path to the CSV (defaults to the canonical dataset location).
+    limit:    publish at most this many rows (handy for a quick demo); None = all.
+
     Returns a summary dict: {total, published, errors}
     """
+    csv_path = csv_path or _DEFAULT_CSV
     path = Path(csv_path)
     if not path.exists():
         raise FileNotFoundError(f"CSV not found: {csv_path}")
@@ -64,6 +80,9 @@ def publish_transactions(csv_path: str = "data/transactions.csv") -> dict:
             except Exception as e:
                 log.error(f"Failed to publish {row.get('tx_id', '?')}: {e}")
                 stats["errors"] += 1
+            if limit and stats["published"] >= limit:
+                log.info(f"Reached publish limit ({limit}); stopping.")
+                break
 
     log.info(f"Done. published={stats['published']} errors={stats['errors']}")
     return stats

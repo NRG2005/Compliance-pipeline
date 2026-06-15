@@ -851,6 +851,77 @@ def _c4_num(v, default=0.0):
         return default
 
 
+# --- phi4 confirm/veto for a fired C4 case -------------------------------
+# C4's deterministic stage can over-fire: a customer legitimately resuming an old
+# account with a small/expected amount, or a young FULL-KYC account making a
+# normal payment, look like dormancy/new-account risk. phi4 reviews the fired
+# case in context and can downgrade it to NORMAL. Falls back to SUSPICIOUS (i.e.
+# the deterministic fire stands) if Ollama is unreachable.
+_C4_OLLAMA_CHAT_URL = OLLAMA_BASE_URL.rstrip("/") + "/api/chat"
+
+_C4_CONFIRM_SYSTEM = (
+    "You are an account-risk analyst for an Indian bank's AML Early Warning System. "
+    "A deterministic rule has flagged an account for EITHER dormant-account "
+    "reactivation OR a high-value transaction on a young / Min-KYC account. Decide "
+    "whether this is genuinely SUSPICIOUS or a benign NORMAL pattern. NORMAL "
+    "examples: a customer resuming use of a long-idle account with a small or "
+    "expected amount; a young FULL-KYC account making a routine payment. "
+    "SUSPICIOUS examples: a long-dormant account suddenly moving large value on "
+    "Min-KYC; a brand-new Min-KYC account pushing a large transfer. "
+    'Respond ONLY as JSON: {"label":"SUSPICIOUS|NORMAL","confidence":0.0-1.0,'
+    '"reason":"<one sentence>"}'
+)
+
+
+def slm_confirm(acc, trigger, amount_inr):
+    """Ask phi4 to confirm or veto a fired C4 case. Returns
+    {label, confidence, reason}; label SUSPICIOUS keeps the fire, NORMAL vetoes."""
+    prompt = (
+        f"Trigger: {trigger}\n"
+        f"Account type: {acc.get('account_type')}\n"
+        f"KYC status: {acc.get('kyc_status')}\n"
+        f"Account age (days): {acc.get('account_age_days')}\n"
+        f"Dormancy (days): {acc.get('account_dormancy_days')}\n"
+        f"Avg monthly txn value (INR): {acc.get('avg_monthly_txn_value_inr')}\n"
+        f"This transaction amount (INR): {amount_inr:,.0f}\n"
+        "Is this genuinely suspicious? Reply JSON only."
+    )
+    try:
+        import urllib.request
+
+        body = json.dumps({
+            "model": OLLAMA_MODEL.split(":")[0],
+            "format": "json",
+            "stream": False,
+            "keep_alive": "30m",
+            "options": {"temperature": 0},
+            "messages": [
+                {"role": "system", "content": _C4_CONFIRM_SYSTEM},
+                {"role": "user", "content": prompt},
+            ],
+        }).encode()
+        req = urllib.request.Request(
+            _C4_OLLAMA_CHAT_URL, data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=60) as r:
+            content = json.loads(r.read().decode())["message"]["content"]
+        cleaned = content.strip()
+        if "{" in cleaned:
+            cleaned = cleaned[cleaned.index("{"): cleaned.rindex("}") + 1]
+        v = json.loads(cleaned)
+        label = str(v.get("label", "SUSPICIOUS")).strip().upper().strip("<>")
+        return {
+            "label": "SUSPICIOUS" if label.startswith("SUS") else "NORMAL",
+            "confidence": float(v.get("confidence", 0.5) or 0.5),
+            "reason": str(v.get("reason", "")),
+        }
+    except Exception:
+        # Ollama down / malformed -> deterministic fire stands.
+        return {"label": "SUSPICIOUS", "confidence": 0.5,
+                "reason": "phi4 unavailable — deterministic result stands"}
+
+
 def evaluate_row(row, dl):
     """Return {fired, score, trigger} for one unified transactions.csv row."""
     acc = dl.account_for(row.get("sender_account_id", ""))

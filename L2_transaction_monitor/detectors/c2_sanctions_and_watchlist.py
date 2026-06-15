@@ -703,8 +703,28 @@ def _load_watchlist():
 
 def check_sanctions_and_watchlist(transaction_data):
     event = transaction_data if "sender" in transaction_data else row_to_event(transaction_data)
-    res = t2_check(event, _load_watchlist(), 0.55, 0.95, slm_judge_mock, {})
+    judge_fn, judge_kw = _resolve_judge()
+    res = t2_check(event, _load_watchlist(), 0.55, 0.95, judge_fn, judge_kw)
     return {"check": "C2", "score": float(res["max_score"]), "decision": res["decision"]}
+
+
+# ---------------------------------------------------------------------------
+# SLM judge resolution: prefer REAL phi4 over Ollama; fall back to the local
+# mock heuristic if Ollama is unreachable. Resolved once and cached so we do not
+# health-check Ollama on every transaction.
+# ---------------------------------------------------------------------------
+_JUDGE_CACHE = None
+
+
+def _resolve_judge(model="phi4-mini"):
+    global _JUDGE_CACHE
+    if _JUDGE_CACHE is None:
+        ok, _msg = check_ollama(model)
+        if ok:
+            _JUDGE_CACHE = (slm_judge_ollama, {"model": model})
+        else:
+            _JUDGE_CACHE = (slm_judge_mock, {})
+    return _JUDGE_CACHE
 
 
 # ---------------------------------------------------------------------------
@@ -723,7 +743,8 @@ def evaluate_row(row, watchlist):
     common-name and fuzzy-typo false positives.
     """
     event = row_to_event(row)
-    res = t2_check(event, watchlist, 0.55, 0.95, slm_judge_mock, {})
+    judge_fn, judge_kw = _resolve_judge()
+    res = t2_check(event, watchlist, 0.55, 0.95, judge_fn, judge_kw)
     if not res["hit"]:
         return {"fired": False, "score": 0.0, "trigger": None}
 

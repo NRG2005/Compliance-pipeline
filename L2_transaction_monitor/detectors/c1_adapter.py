@@ -74,7 +74,12 @@ def evaluate_row(row, dl):
         ]
         if len(credit_legs) >= CREDIT_MIN_24H:
             score = round(min(0.5 + 0.1 * len(credit_legs), 1.0), 4)
-            return {"fired": True, "score": score, "trigger": "C1_creditline"}
+            return {"fired": True, "score": score, "trigger": "C1_creditline",
+                    "evidence": {
+                        "sc2_total_band_count_24h": len(credit_legs),
+                        "sc1_count_1h": len(credit_legs),
+                        "sc1_threshold_profile": "CREDIT_DRAWDOWN",
+                    }}
 
     # ---- Structuring: repeated legs to same beneficiary in band ----
     if STRUCT_BAND_LO <= cur_amt <= STRUCT_BAND_HI and cur_ts is not None and cur_receiver:
@@ -86,7 +91,13 @@ def evaluate_row(row, dl):
         ]
         if len(same_bene) >= STRUCT_MIN_LEGS:
             score = round(min(0.5 + 0.1 * len(same_bene), 1.0), 4)
-            return {"fired": True, "score": score, "trigger": "C1_structuring"}
+            return {"fired": True, "score": score, "trigger": "C1_structuring",
+                    "evidence": {
+                        "sc3_repeat_count_24h": len(same_bene),
+                        "sc3_total_inr_to_receiver_24h": sum(_f(s.get("amount_inr")) for s in same_bene),
+                        "sc2_total_band_count_24h": len(same_bene),
+                        "sc1_threshold_profile": "STRUCTURING_SAME_BENE",
+                    }}
 
     # ---- Velocity spike: many legs in a rolling 1h window ----
     if cur_ts is not None:
@@ -96,7 +107,12 @@ def evaluate_row(row, dl):
         ]
         if len(window) >= VEL_MIN_1H:
             score = round(min(0.4 + 0.04 * len(window), 1.0), 4)
-            return {"fired": True, "score": score, "trigger": "C1_velocity"}
+            return {"fired": True, "score": score, "trigger": "C1_velocity",
+                    "evidence": {
+                        "sc1_count_1h": len(window),
+                        "sc4_spike_ratio": round(len(window) / max(VEL_MIN_1H, 1), 2),
+                        "sc1_threshold_profile": "VELOCITY_SPIKE",
+                    }}
 
     return {"fired": False, "score": 0.0, "trigger": None}
 

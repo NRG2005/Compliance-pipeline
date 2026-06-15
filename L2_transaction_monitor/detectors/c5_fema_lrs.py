@@ -333,8 +333,12 @@ def evaluate_row(row, dl):
     that were individually compliant. Only the leg that actually tips cumulative
     utilisation over the ceiling is the breach — earlier legs stay clean.
     """
-    # Domestic legs are out of scope for C5.
-    if row.get("is_cross_border") != "1":
+    # Domestic legs are out of scope for C5. Accept BOTH the raw CSV string "1"
+    # and the Python bool True: L0's queue receiver coerces is_cross_border to a
+    # bool, while the DataLayer/run_one path keeps the CSV string — so this gate
+    # must recognise either form or C5 silently never fires on the live path.
+    xb = row.get("is_cross_border")
+    if not (xb == "1" or xb is True):
         return {"fired": False, "score": 0.0, "trigger": None}
 
     pan = row.get("sender_pan", "")
@@ -404,12 +408,21 @@ def evaluate_row(row, dl):
                    "channel": row.get("channel", ""),
                    "purpose_code": row.get("purpose_code", "")}
         prompt = build_judge_prompt(f, current, upto)
-        out = mock_phi4(JUDGE_SYSTEM, prompt)
+        out = _c5_judge(JUDGE_SYSTEM, prompt)
         if out.get("decision") == "FLAG":
             return {"fired": True, "trigger": "C5_gift_ratio",
                     "score": round(min(gift_ratio / 10.0, 1.0), 4)}
 
     return {"fired": False, "score": 0.0, "trigger": None}
+
+
+def _c5_judge(system, prompt):
+    """Borderline-band judge: REAL phi4 over Ollama, falling back to the
+    deterministic mock heuristic if Ollama is unreachable or returns bad JSON."""
+    try:
+        return call_phi4_ollama(system, prompt)
+    except Exception:
+        return mock_phi4(system, prompt)
 
 
 def _parse_ts_safe(ts):
