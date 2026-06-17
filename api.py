@@ -16,6 +16,7 @@ import asyncio
 import datetime
 import hashlib
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -23,6 +24,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # ── Make sure repo root is on sys.path ────────────────────────────────────────
@@ -30,6 +32,10 @@ ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT))
 
 app = FastAPI(title="Compliance Pipeline API")
+
+# Ensure reports directory exists and mount it
+os.makedirs(os.path.join(ROOT, "reports"), exist_ok=True)
+app.mount("/reports", StaticFiles(directory=os.path.join(ROOT, "reports")), name="reports")
 
 app.add_middleware(
     CORSMiddleware,
@@ -308,21 +314,29 @@ async def stream_transaction(tx: TransactionRequest):
                         }
                         
                         try:
-                            from L4.l4_report_generator import run_l4, write_pdf_review_copy, _resolve_desktop
+                            from L4.l4_report_generator import run_l4, write_pdf_review_copy
                             l4_result = run_l4(l3_verdict_obj, l2_evidence, tx_l4)
                             if l4_result["disposition"] == "FILED":
-                                pdf_dir = _resolve_desktop()
+                                pdf_dir = os.path.join(ROOT, "reports")
+                                os.makedirs(pdf_dir, exist_ok=True)
                                 pdf_path = write_pdf_review_copy(l4_result, l3_verdict_obj, tx_l4, pdf_dir)
-                                l4_detail = f"STR PDF generated at {pdf_path}"
+                                pdf_url = f"/reports/{os.path.basename(pdf_path)}"
+                                l4_detail = f"STR PDF generated at {pdf_url}"
+                                l4_event = {
+                                    "layer": 4, "status": "str",
+                                    "chip_label": "STR generated",
+                                    "detail": l4_detail,
+                                    "sub_checks": [], "sub_scores": [],
+                                    "str_pdf_url": pdf_url
+                                }
                             else:
                                 l4_detail = f"Failed to generate valid STR after {l4_result['attempts']} attempts"
-
-                            l4_event = {
-                                "layer": 4, "status": "str" if l4_result["disposition"] == "FILED" else "error",
-                                "chip_label": "STR generated" if l4_result["disposition"] == "FILED" else "STR Error",
-                                "detail": l4_detail,
-                                "sub_checks": [], "sub_scores": [],
-                            }
+                                l4_event = {
+                                    "layer": 4, "status": "error",
+                                    "chip_label": "STR Error",
+                                    "detail": l4_detail,
+                                    "sub_checks": [], "sub_scores": [],
+                                }
                         except Exception as e:
                             import traceback
                             l4_event = {

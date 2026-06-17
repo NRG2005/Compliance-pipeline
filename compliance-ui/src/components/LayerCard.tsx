@@ -143,6 +143,28 @@ export function LayerCard({ index, state, isLast }: Props) {
         {isOpen && state.detail && (
           <div style={{ marginTop: 5 }}>
             <p style={{ fontSize: 11, color: "var(--text-muted)", lineHeight: 1.5 }}>{state.detail}</p>
+            
+            {state.str_pdf_url && (
+              <a 
+                href={`http://127.0.0.1:8000${state.str_pdf_url}`} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                style={{
+                  display: "inline-block",
+                  marginTop: "8px",
+                  padding: "4px 10px",
+                  background: "#EEEDFE",
+                  color: "#3C3489",
+                  borderRadius: "6px",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  textDecoration: "none",
+                  border: "1px solid #c9c5fa"
+                }}
+              >
+                📄 View STR Report (PDF)
+              </a>
+            )}
 
             {/* Sub-checks pills */}
             {state.sub_checks && state.sub_checks.length > 0 && (

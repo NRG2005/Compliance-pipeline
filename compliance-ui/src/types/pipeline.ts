@@ -56,6 +56,7 @@ export interface LayerEvent {
   sub_checks?: SubCheck[];
   sub_scores?: SubScore[];
   latency_ms?: number;
+  str_pdf_url?: string;
 }
 
 // ── Final result ─────────────────────────────────────────────────────────────
