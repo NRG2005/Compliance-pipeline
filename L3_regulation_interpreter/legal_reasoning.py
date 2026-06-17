@@ -90,7 +90,7 @@ Return ONLY JSON with this exact structure:
   "citation_trail": [
     {{
       "chunk_id": "...",
-      "excerpt": "short excerpt",
+      "excerpt": "short excerpt starting with the rule designation (e.g., Article 22.1) followed by the rule text",
       "why_it_matters": "..."
     }}
   ],
@@ -104,6 +104,35 @@ Final score MUST reflect the weighted legal confidence after reasoning.
 If the rules are weakly related or evidence is thin, lower the score.
 """.strip()
 
+def _enrich_citation_trail(citation_trail, all_chunks):
+    """Add rule designation to each citation entry.
+    citation_trail: list of dicts with at least "chunk_id" and "excerpt".
+    all_chunks: list of chunk dicts (azure + nomic) containing metadata.
+    Returns a new list with an added "rule_designation" field and ensures the excerpt starts with it.
+    """
+    # Build a mapping from chunk_id to chunk metadata for quick lookup
+    chunk_map = {c.get("chunk_id"): c for c in all_chunks}
+    enriched = []
+    for entry in citation_trail:
+        chunk_id = entry.get("chunk_id")
+        chunk = chunk_map.get(chunk_id, {})
+        # Prefer section_id, fallback to document_id, then title
+        designation = chunk.get("section_id") or chunk.get("document_id") or chunk.get("title") or ""
+        # Clean designation (strip whitespace)
+        designation = str(designation).strip()
+        # Ensure excerpt starts with designation
+        excerpt = entry.get("excerpt", "")
+        if designation and not excerpt.startswith(designation):
+            excerpt = f"{designation} – {excerpt}" if designation else excerpt
+        enriched_entry = {
+            **entry,
+            "rule_designation": designation,
+            "excerpt": excerpt,
+        }
+        enriched.append(enriched_entry)
+    return enriched
+
+
 def generate_legal_analysis(event, retrieval):
     """
     Uses a large language model to analyze the transaction against the retrieved regulations.
@@ -114,58 +143,78 @@ def generate_legal_analysis(event, retrieval):
 
     azure_chunks = retrieval.get("chunks", [])
     nomic_chunks = retrieval.get("nomic_chunks", [])
-    
-    azure_analysis = None
-    nomic_analysis = None
-    
-    fallback_reason = "LLM not configured."
-    if is_llm_configured():
-        # Evaluate Azure Chunks
-        try:
-            if azure_chunks:
-                azure_analysis = chat_json(
-                    system_prompt=SYSTEM_PROMPT,
-                    user_prompt=_build_reasoning_prompt(event, azure_chunks),
-                )
-                azure_analysis["backend_used"] = "azure_ai_search"
-        except Exception as exc:
-            print(f"L3: Azure evaluation failed: {exc}")
-            
-        # Evaluate Local Nomic Chunks
-        try:
-            if nomic_chunks:
-                nomic_analysis = chat_json(
-                    system_prompt=SYSTEM_PROMPT,
-                    user_prompt=_build_reasoning_prompt(event, nomic_chunks),
-                )
-                nomic_analysis["backend_used"] = "local_nomic_search"
-        except Exception as exc:
-            print(f"L3: Local Nomic evaluation failed: {exc}")
-            
-    # Determine the winner (highest final_score)
-    winner = None
-    if azure_analysis and nomic_analysis:
-        if float(nomic_analysis.get("final_score", 0)) > float(azure_analysis.get("final_score", 0)):
-            print(f"L3 Dual-Eval: Local Nomic model scored higher confidence ({nomic_analysis.get('final_score')} vs {azure_analysis.get('final_score')}). Using Local!")
-            winner = nomic_analysis
-        else:
-            print(f"L3 Dual-Eval: Azure model scored higher or equal confidence. Using Azure!")
-            winner = azure_analysis
-    elif azure_analysis:
-        winner = azure_analysis
-    elif nomic_analysis:
-        winner = nomic_analysis
-        
-    if winner:
-        return winner
 
-    print("L3: Fallback triggered.")
-    return {
-        "retrieval_match": 0.0,
-        "rule_applicability": 0.0,
-        "evidence_sufficiency": 0.0,
-        "precedent_confidence": 0.0,
-        "citation_trail": f"Fallback: {fallback_reason}",
-        "final_score": 0.0,
-        "verdict": "review"
-    }
+    try:
+        # The existing try/except blocks for each backend remain unchanged.
+        azure_analysis = None
+        nomic_analysis = None
+        fallback_reason = "LLM not configured."
+        if is_llm_configured():
+            # Evaluate Azure Chunks
+            try:
+                if azure_chunks:
+                    azure_analysis = chat_json(
+                        system_prompt=SYSTEM_PROMPT,
+                        user_prompt=_build_reasoning_prompt(event, azure_chunks),
+                    )
+                    azure_analysis["backend_used"] = "azure_ai_search"
+            except Exception as exc:
+                print(f"L3: Azure evaluation failed: {exc}")
+
+            # Evaluate Local Nomic Chunks
+            try:
+                if nomic_chunks:
+                    nomic_analysis = chat_json(
+                        system_prompt=SYSTEM_PROMPT,
+                        user_prompt=_build_reasoning_prompt(event, nomic_chunks),
+                    )
+                    nomic_analysis["backend_used"] = "local_nomic_search"
+            except Exception as exc:
+                print(f"L3: Local Nomic evaluation failed: {exc}")
+        else:
+            fallback_reason = "LLM not configured (no API key)."
+
+        # Determine the winner (highest final_score)
+        winner = None
+        if azure_analysis and nomic_analysis:
+            if float(nomic_analysis.get("final_score", 0)) > float(azure_analysis.get("final_score", 0)):
+                print(f"L3 Dual-Eval: Local Nomic model scored higher confidence ({nomic_analysis.get('final_score')} vs {azure_analysis.get('final_score')}). Using Local!")
+                winner = nomic_analysis
+            else:
+                print("L3 Dual-Eval: Azure model scored higher or equal confidence. Using Azure!")
+                winner = azure_analysis
+        elif azure_analysis:
+            winner = azure_analysis
+        elif nomic_analysis:
+            winner = nomic_analysis
+
+        if winner:
+            # Enrich citation_trail if present as a list
+            if isinstance(winner.get("citation_trail"), list):
+                all_chunks = azure_chunks + nomic_chunks
+                winner["citation_trail"] = _enrich_citation_trail(winner.get("citation_trail", []), all_chunks)
+            return winner
+
+        # No successful analysis – fallback
+        print("L3: Fallback triggered – no LLM analysis succeeded.")
+        return {
+            "retrieval_match": 0.0,
+            "rule_applicability": 0.0,
+            "evidence_sufficiency": 0.0,
+            "precedent_confidence": 0.0,
+            "citation_trail": f"Fallback: {fallback_reason}",
+            "final_score": 0.0,
+            "verdict": "review",
+        }
+    except Exception as outer_exc:
+        # Catch any unexpected error and return a safe default
+        print(f"L3: Unexpected error during legal analysis: {outer_exc}")
+        return {
+            "retrieval_match": 0.0,
+            "rule_applicability": 0.0,
+            "evidence_sufficiency": 0.0,
+            "precedent_confidence": 0.0,
+            "citation_trail": f"Unexpected error: {outer_exc}",
+            "final_score": 0.0,
+            "verdict": "error",
+        }

@@ -6,7 +6,7 @@ load_dotenv()
 class Config:
     """Base configuration."""
     # Azure Queue Storage (L0 transport)
-    AZURE_STORAGE_CONNECTION_STRING = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
+    AZURE_STORAGE_CONNECTION_STRING = os.environ.get("AZURE_STORAGE_CONNECTION_STRING", os.environ.get("BLOB_STORAGE_CONNECTION_STRING"))
     AZURE_STORAGE_QUEUE_NAME = os.environ.get("AZURE_STORAGE_QUEUE_NAME", "tx-events")
     AZURE_STORAGE_ACCOUNT_NAME = os.environ.get("AZURE_STORAGE_ACCOUNT_NAME")
 

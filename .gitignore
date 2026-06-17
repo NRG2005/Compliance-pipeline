@@ -31,4 +31,7 @@ local.settings.json
 data/
 
 #Ignore metrics report for t1
-baseline_metrics_report.json
+baseline_metrics_report.json*.sqlite3
+debug_frontend_payload.json
+test_*.py
+compliance-ui/node_modules/

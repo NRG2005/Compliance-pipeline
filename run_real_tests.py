@@ -72,22 +72,29 @@ async def run():
         
         state = await orchestrator.handle_event(tx_adapted)
         
+        # Neater formatted output
         print(f"   ✅ PIPELINE RESULTS:")
-        print(f"      - Route Taken:   {state.get('route')}")
-        print(f"      - L2 Score:      {state.get('suspicion_score', 'N/A')}")
+        print(f"      - Route Taken:   {state.get('route', '')}")
+        # L2 Score with 4 decimal places if numeric
+        l2_score = state.get('suspicion_score')
+        l2_score_str = f"{l2_score:.4f}" if isinstance(l2_score, (int, float)) else l2_score
+        print(f"      - L2 Score:      {l2_score_str}")
         if state.get('triggers_fired'):
             print(f"      - L2 Triggers:   {state.get('triggers_fired')}")
-            
         if state.get('verdict'):
             verdict = state.get('verdict').upper()
             icon = "🔴" if verdict == "SUSPICIOUS" else "🟡" if verdict == "REVIEW" else "🟢"
             print(f"      - L3 Verdict:    {icon} {verdict}")
-            print(f"      - L3 Confidence: {state.get('confidence')}")
+            # Confidence with 2 decimal places
+            conf = state.get('confidence')
+            conf_str = f"{conf:.2f}" if isinstance(conf, (int, float)) else conf
+            print(f"      - L3 Confidence: {conf_str}")
             
-            # Print citation if suspicious
+            # Print citation details if available
             citations = state.get('citation_trail')
             if citations and isinstance(citations, list) and len(citations) > 0:
-                print(f"      - L3 Citation:   {citations[0].get('why_it_matters', '')}")
+                first = citations[0]
+                print(f"      - L3 Citation:   Rule {first.get('rule_designation', '')}: {first.get('excerpt', '')}")
             elif citations and isinstance(citations, str):
                 print(f"      - L3 Fallback:   {citations}")
                 
