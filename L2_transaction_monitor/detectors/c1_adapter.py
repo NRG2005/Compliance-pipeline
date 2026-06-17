@@ -30,8 +30,8 @@ from collections import defaultdict
 VEL_MIN_1H = 6                 # >= this many legs in a rolling 1h window
 
 # --- structuring ---
-STRUCT_BAND_LO = 150_000.0     # band the smurfing legs fall in (~Rs 2L)
-STRUCT_BAND_HI = 300_000.0
+STRUCT_BAND_LO = 40_000.0     # band the smurfing legs fall in
+STRUCT_BAND_HI = 49_999.0
 STRUCT_MIN_LEGS = 3            # >= this many legs to the same beneficiary
 STRUCT_WINDOW_DAYS = 7
 

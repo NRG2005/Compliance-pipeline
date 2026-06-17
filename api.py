@@ -201,8 +201,15 @@ async def stream_transaction(tx: TransactionRequest):
                 yield sse({"type": "layer_start", "layer": 2})
                 t0 = time.monotonic()
 
-                from L1_orchestrator.orchestrator import call_l2
+                from L1_orchestrator.orchestrator import call_l2, _dl
                 state = await call_l2(state)
+
+                # Persist to in-memory history so subsequent transactions in the stream can see this one
+                if _dl is not None:
+                    # We need receiver_account_id mapping just like in frontend parsing
+                    hist_tx = tx_dict_str.copy()
+                    hist_tx["receiver_account_id"] = hist_tx.get("receiver_account_external", "")
+                    _dl.add_to_history(hist_tx)
 
                 # ── DEBUG: print full L2 result to uvicorn terminal ──────────
                 import logging as _log
@@ -268,13 +275,51 @@ async def stream_transaction(tx: TransactionRequest):
                     layer_events.append(l3_event)
                     yield sse({"type": "layer_complete", "event": l3_event})
 
-                    # ── L4 & L5 routing ──────────────────────────────────────
                     if confidence >= 0.70:
-                        l4_event = {
-                            "layer": 4, "status": "str", "chip_label": "STR generated",
-                            "detail": "goAML XML → Jinja2 template · lxml XSD validation · written to Blob",
-                            "sub_checks": [], "sub_scores": [],
+                        l2_evidence = {
+                            "primary_category": "C1",
+                            "l2_score": state.get("suspicion_score"),
+                            "l2_triggers": state.get("triggers_fired") or [],
+                            "sender": {"name": tx.sender_name, "pan": tx.sender_pan, "dob": ""},
+                            "receiver": {"name": tx.receiver_name, "pan": tx.receiver_pan, "dob": tx.receiver_dob},
                         }
+                        tx_l4 = tx_dict_str.copy()
+                        tx_l4["date"] = tx.timestamp or datetime.datetime.now().isoformat()
+                        tx_l4["amount"] = str(tx.amount_inr)
+                        tx_l4["currency"] = "INR"
+
+                        l3_verdict_obj = {
+                            "verdict": verdict,
+                            "confidence": confidence,
+                            "citation_trail": citation_trail,
+                            "clause_no": state.get("clause_no", ""),
+                            "clause": state.get("clause", ""),
+                            "citation": state.get("citation", ""),
+                        }
+                        
+                        try:
+                            from L4.l4_report_generator import run_l4, write_pdf_review_copy, _resolve_desktop
+                            l4_result = run_l4(l3_verdict_obj, l2_evidence, tx_l4)
+                            if l4_result["disposition"] == "FILED":
+                                pdf_dir = _resolve_desktop()
+                                pdf_path = write_pdf_review_copy(l4_result, l3_verdict_obj, tx_l4, pdf_dir)
+                                l4_detail = f"STR PDF generated at {pdf_path}"
+                            else:
+                                l4_detail = f"Failed to generate valid STR after {l4_result['attempts']} attempts"
+
+                            l4_event = {
+                                "layer": 4, "status": "str" if l4_result["disposition"] == "FILED" else "error",
+                                "chip_label": "STR generated" if l4_result["disposition"] == "FILED" else "STR Error",
+                                "detail": l4_detail,
+                                "sub_checks": [], "sub_scores": [],
+                            }
+                        except Exception as e:
+                            import traceback
+                            l4_event = {
+                                "layer": 4, "status": "error", "chip_label": "L4 Error",
+                                "detail": f"Failed to run L4: {e}",
+                                "sub_checks": [], "sub_scores": [],
+                            }
                     else:
                         l4_event = {
                             "layer": 4, "status": "skip", "chip_label": "Skipped",

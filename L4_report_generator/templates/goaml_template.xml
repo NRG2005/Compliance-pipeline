@@ -1,9 +1,0 @@
-<!-- L4: goAML XML Template -->
-<report>
-    <transaction>
-        <amount>{{ case.amount }}</amount>
-        <sender>{{ case.sender_id }}</sender>
-        <receiver>{{ case.receiver_id }}</receiver>
-    </transaction>
-    <!-- Add other required goAML fields here -->
-</report>

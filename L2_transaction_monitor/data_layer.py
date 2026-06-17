@@ -98,6 +98,36 @@ class DataLayer:
         with open(path, newline="", encoding="utf-8") as fh:
             return list(csv.DictReader(fh))
 
+    def add_to_history(self, tx: dict):
+        """Append a transaction to the in-memory history so velocity detectors see it immediately."""
+        s = tx.get("sender_account_id")
+        d = tx.get("receiver_account_id") or tx.get("receiver_account_external")
+        amt = _f(tx.get("amount_inr"))
+        ts = _parse_ts(tx.get("timestamp"))
+        channel = tx.get("channel")
+        
+        # Sender (Debit leg)
+        if s:
+            r = {
+                "account_id": s, "timestamp": tx.get("timestamp"),
+                "amount_inr": amt, "channel": channel,
+                "counterparty_id": d, "direction": "DEBIT", "_ts": ts
+            }
+            self.history[s].append(r)
+            self.history[s].sort(key=lambda x: x["_ts"] or datetime.min)
+            self.tx_out[s].append(tx)
+            
+        # Receiver (Credit leg)
+        if d:
+            r = {
+                "account_id": d, "timestamp": tx.get("timestamp"),
+                "amount_inr": amt, "channel": channel,
+                "counterparty_id": s, "direction": "CREDIT", "_ts": ts
+            }
+            self.history[d].append(r)
+            self.history[d].sort(key=lambda x: x["_ts"] or datetime.min)
+            self.tx_in[d].append(tx)
+
     # -- per-account rolling history -----------------------------------------
     def history_for(self, account_id, before_ts=None, hours=None, direction=None):
         """
