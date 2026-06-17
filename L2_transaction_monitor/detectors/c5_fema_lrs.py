@@ -337,7 +337,7 @@ def evaluate_row(row, dl):
     if row.get("is_cross_border") != "1":
         return {"fired": False, "score": 0.0, "trigger": None}
 
-    pan = row.get("sender_pan", "")
+    pan = row.get("sender_pan", "") or row.get("sender_account_id", "")
     legs = dl.xborder_by_pan.get(pan, [])
     cur_ts = _parse_ts_safe(row.get("timestamp"))
     cur_id = row.get("tx_id")
@@ -355,6 +355,7 @@ def evaluate_row(row, dl):
     prev_usd = ytd_usd - _c5_usd(row)
     util = ytd_usd / LRS_CEILING_USD
     prev_util = prev_usd / LRS_CEILING_USD
+    print(f"DEBUG C5: amt={row.get('amount_inr')} usd_equiv={row.get('usd_equiv')} fx={row.get('fx_usd_inr')} ytd_usd={ytd_usd} prev_usd={prev_usd} util={util} prev_util={prev_util}")
 
     # (b) gift ratio: cumulative gift up to this leg vs the first gift leg.
     gift_active = row.get("purpose_code") == GIFT_PURPOSE

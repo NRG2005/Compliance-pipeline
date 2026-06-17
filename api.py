@@ -117,12 +117,22 @@ async def stream_transaction(tx: TransactionRequest):
         tx_dict_str["receiver_dob"] = tx.receiver_dob
         tx_dict_str["receiver_cin"] = ""
         # Use CSV's is_cross_border when present; fall back to SWIFT channel detection.
+        # Cross-border determination
+        is_foreign = False
+        ch = tx.channel.upper()
+        if ch == "SWIFT":
+            is_foreign = True
+        elif tx.receiver_city and ("UK" in tx.receiver_city.upper() or "SINGAPORE" in tx.receiver_city.upper()):
+            is_foreign = True
+        elif tx.receiver_account_external and (tx.receiver_account_external.startswith("UK_") or tx.receiver_account_external.startswith("SG_")):
+            is_foreign = True
+
         tx_dict_str["is_cross_border"] = (
             tx.is_cross_border if tx.is_cross_border in ("0", "1")
-            else ("1" if tx.channel.upper() == "SWIFT" else "0")
+            else ("1" if is_foreign else "0")
         )
-        tx_dict_str["usd_equiv"] = tx.usd_equiv
-        tx_dict_str["fx_usd_inr"] = tx.fx_usd_inr
+        tx_dict_str["usd_equiv"] = tx.usd_equiv if tx.usd_equiv else str(float(tx.amount_inr) / 83.0)
+        tx_dict_str["fx_usd_inr"] = tx.fx_usd_inr if tx.fx_usd_inr else "83.0"
         tx_dict_str["beneficiary_id"] = tx.beneficiary_id or tx.receiver_account_external
         tx_dict_str["sender_pan"] = tx.sender_pan
         tx_dict_str["tx_location_country"] = tx.tx_location_country

@@ -127,6 +127,12 @@ class DataLayer:
             self.history[d].append(r)
             self.history[d].sort(key=lambda x: x["_ts"] or datetime.min)
             self.tx_in[d].append(tx)
+            
+        # Cross border legs
+        if tx.get("is_cross_border") == "1":
+            pan = tx.get("sender_pan", "") or tx.get("sender_account_id", "")
+            if pan:
+                self.xborder_by_pan[pan].append(tx)
 
     # -- per-account rolling history -----------------------------------------
     def history_for(self, account_id, before_ts=None, hours=None, direction=None):

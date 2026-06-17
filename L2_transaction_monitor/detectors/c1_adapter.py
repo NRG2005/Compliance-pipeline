@@ -64,6 +64,11 @@ def evaluate_row(row, dl):
     cur_purpose = row.get("purpose_code", "")
     cur_receiver = row.get("receiver_account_id", "")
 
+    # ---- High Value Transaction (>10 Lakhs) ----
+    if cur_amt >= 1_000_000.0:
+        score = round(min(0.4 + 0.05 * (cur_amt / 1_000_000.0), 1.0), 4)
+        return {"fired": True, "score": score, "trigger": "C1_high_value"}
+
     # ---- Credit-line probing (most specific, check first) ----
     if cur_purpose in CREDIT_PURPOSES and cur_amt < CREDIT_BAND_HI and cur_ts is not None:
         credit_legs = [
