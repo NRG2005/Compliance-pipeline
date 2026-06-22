@@ -107,6 +107,7 @@ async def stream_transaction(tx: TransactionRequest):
         tx_dict = tx.model_dump()
         tx_dict_str = {k: str(v) if v is not None else "" for k, v in tx_dict.items()}
         tx_dict_str["amount_inr"] = tx.amount_inr  # keep as float for L2 checks
+        tx_dict_str["amount"] = str(tx.amount_inr)
         
         # DEBUG: Dump the exact payload received from the frontend
         import json
@@ -217,15 +218,27 @@ async def stream_transaction(tx: TransactionRequest):
                 yield sse({"type": "layer_start", "layer": 2})
                 t0 = time.monotonic()
 
-                from L1_orchestrator.orchestrator import call_l2, _dl
-                state = await call_l2(state)
+                import L1_orchestrator.orchestrator as l1_orch
+                state = await l1_orch.call_l2(state)
 
                 # Persist to in-memory history so subsequent transactions in the stream can see this one
-                if _dl is not None:
+                if l1_orch._dl is not None:
                     # We need receiver_account_id mapping just like in frontend parsing
                     hist_tx = tx_dict_str.copy()
                     hist_tx["receiver_account_id"] = hist_tx.get("receiver_account_external", "")
-                    _dl.add_to_history(hist_tx)
+                    l1_orch._dl.add_to_history(hist_tx)
+                    
+                    # Also persist to UI cache CSV so the graph retains history across API restarts
+                    ui_cache_path = os.path.join(l1_orch._dl.dir, "ui_transactions.csv")
+                    # Ensure file exists with headers
+                    if not os.path.exists(ui_cache_path):
+                        with open(ui_cache_path, "w") as f:
+                            f.write(",".join(hist_tx.keys()) + "\\n")
+                    
+                    with open(ui_cache_path, "a") as f:
+                        # Write the values in the same order as the keys
+                        vals = [str(hist_tx.get(k, "")).replace(",", " ") for k in hist_tx.keys()]
+                        f.write(",".join(vals) + "\\n")
 
                 # ── DEBUG: print full L2 result to uvicorn terminal ──────────
                 import logging as _log
@@ -296,8 +309,8 @@ async def stream_transaction(tx: TransactionRequest):
                             "primary_category": "C1",
                             "l2_score": state.get("suspicion_score"),
                             "l2_triggers": state.get("triggers_fired") or [],
-                            "sender": {"name": tx.sender_name, "pan": tx.sender_pan, "dob": ""},
-                            "receiver": {"name": tx.receiver_name, "pan": tx.receiver_pan, "dob": tx.receiver_dob},
+                            "sender": {"name": tx.sender_name or "Unknown Sender", "pan": tx.sender_pan, "dob": ""},
+                            "receiver": {"name": tx.receiver_name or "Unknown Receiver", "pan": tx.receiver_pan, "dob": tx.receiver_dob},
                         }
                         tx_l4 = tx_dict_str.copy()
                         tx_l4["date"] = tx.timestamp or datetime.datetime.now().isoformat()
@@ -311,6 +324,7 @@ async def stream_transaction(tx: TransactionRequest):
                             "clause_no": state.get("clause_no", ""),
                             "clause": state.get("clause", ""),
                             "citation": state.get("citation", ""),
+                            "explanation": state.get("explanation", ""),
                         }
                         
                         try:
@@ -418,6 +432,11 @@ async def stream_transaction(tx: TransactionRequest):
             verdict_str = _state_to_verdict(state, short_circuit)
             sub_scores = _extract_sub_scores(state)
             triggers = state.get("triggers_fired") or []
+            
+            str_pdf_url = None
+            for ev in layer_events:
+                if ev.get("str_pdf_url"):
+                    str_pdf_url = ev["str_pdf_url"]
 
             result = {
                 "tx_id": tx.tx_id,
@@ -433,6 +452,9 @@ async def stream_transaction(tx: TransactionRequest):
                 "processing_time_ms": int((time.monotonic() - start) * 1000),
                 "layer_events": layer_events,
             }
+            if str_pdf_url:
+                result["str_pdf_url"] = str_pdf_url
+                
             yield sse({"type": "result", "result": result})
 
         except Exception as exc:
@@ -490,6 +512,7 @@ def _triggers_to_sub_checks(triggers: list) -> list:
         "C6_impossible_travel": ("C6 impossible travel",    "fail"),
         "C6_subtle_probe":      ("C6 new device probe",     "fail"),
         "C6_newloc_newdev":     ("C6 new location/device",  "fail"),
+        "C1_high_value":        ("T1 high value cash",      "fail"),
     }
     checks = []
     seen = set()
@@ -653,6 +676,18 @@ async def publish_to_queue(req: PublishRequest):
         for row in req.rows:
             try:
                 row_str = {k: str(v) if v is not None else "" for k, v in row.items()}
+
+                # Infer cross-border logic for missing CSV columns
+                receiver_ext = row_str.get("receiver_account_external", "")
+                if row_str.get("receiver_city") in ["Singapore", "London UK", "Dubai", "New York"] or \
+                   receiver_ext.startswith("SG_") or receiver_ext.startswith("UK_") or receiver_ext.startswith("US_"):
+                    row_str["is_cross_border"] = "1"
+                    if not row_str.get("fx_usd_inr"):
+                        row_str["fx_usd_inr"] = "83.5"
+                    if not row_str.get("usd_equiv"):
+                        amount = float(row_str.get("amount_inr", 0) or 0)
+                        row_str["usd_equiv"] = str(round(amount / 83.5, 2))
+
                 client.send_message(json.dumps(row_str))
                 published += 1
             except Exception:

@@ -27,12 +27,12 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 
 # --- velocity ---
-VEL_MIN_1H = 6                 # >= this many legs in a rolling 1h window
+VEL_MIN_1H = 3                 # >= this many legs in a rolling 1h window
 
 # --- structuring ---
-STRUCT_BAND_LO = 40_000.0     # band the smurfing legs fall in
-STRUCT_BAND_HI = 49_999.0
-STRUCT_MIN_LEGS = 3            # >= this many legs to the same beneficiary
+STRUCT_BAND_LO = 10_000.0     # band the smurfing legs fall in
+STRUCT_BAND_HI = 500_000.0
+STRUCT_MIN_LEGS = 2            # >= this many legs to the same beneficiary
 STRUCT_WINDOW_DAYS = 7
 
 # --- credit-line probing ---

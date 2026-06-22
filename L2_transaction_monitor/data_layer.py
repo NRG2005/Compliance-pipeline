@@ -93,6 +93,13 @@ class DataLayer:
             if d:
                 self.tx_in[d].append(r)
 
+        # Load persisted frontend UI cache
+        ui_cache_path = os.path.join(self.dir, "ui_transactions.csv")
+        if os.path.exists(ui_cache_path):
+            with open(ui_cache_path, newline="", encoding="utf-8") as fh:
+                for r in csv.DictReader(fh):
+                    self.add_to_history(r)
+
     def _read(self, name):
         path = os.path.join(self.dir, name)
         with open(path, newline="", encoding="utf-8") as fh:

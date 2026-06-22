@@ -345,17 +345,24 @@ def evaluate_row(row, dl):
     # Legs up to and including the current one, in time order.
     legs_sorted = sorted(legs, key=lambda t: t.get("timestamp", ""))
     upto = []
+    found_current = False
     for t in legs_sorted:
         upto.append(t)
         if t.get("tx_id") == cur_id:
+            found_current = True
             break
+            
+    # If the current row was not already in the data layer history, we MUST append it
+    # so that the utilisation and split checks include the current transaction's amount.
+    if not found_current:
+        upto.append(row)
 
     # (a) LRS utilisation: cumulative USD up to this leg vs the ceiling.
     ytd_usd = sum(_c5_usd(t) for t in upto)
     prev_usd = ytd_usd - _c5_usd(row)
     util = ytd_usd / LRS_CEILING_USD
     prev_util = prev_usd / LRS_CEILING_USD
-    print(f"DEBUG C5: amt={row.get('amount_inr')} usd_equiv={row.get('usd_equiv')} fx={row.get('fx_usd_inr')} ytd_usd={ytd_usd} prev_usd={prev_usd} util={util} prev_util={prev_util}")
+    # print(f"DEBUG C5: amt={row.get('amount_inr')} usd_equiv={row.get('usd_equiv')} fx={row.get('fx_usd_inr')} ytd_usd={ytd_usd} prev_usd={prev_usd} util={util} prev_util={prev_util}")
 
     # (b) gift ratio: cumulative gift up to this leg vs the first gift leg.
     gift_active = row.get("purpose_code") == GIFT_PURPOSE

@@ -184,6 +184,8 @@ async def monitor(row, dl):
     per = dict(zip(cats, results))
 
     weighted = round(sum(WEIGHTS[c] * per[c]["score"] for c in cats), 4)
+    max_cat_score = max((per[c]["score"] for c in cats if per[c]["fired"]), default=0.0)
+    final_score = max(weighted, max_cat_score)
     fired_cats = [c for c in cats if per[c]["fired"]]
     triggers = [per[c]["trigger"] for c in fired_cats if per[c]["trigger"]]
     flag = len(fired_cats) > 0
@@ -191,7 +193,7 @@ async def monitor(row, dl):
     return {
         "tx_id": row["tx_id"],
         "flag": flag,
-        "suspicion_score": weighted,
+        "suspicion_score": final_score,
         "fired_categories": fired_cats,
         "triggers": triggers,
         "per_category": per,

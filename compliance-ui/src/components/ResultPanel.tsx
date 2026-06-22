@@ -163,11 +163,20 @@ export function ResultPanel({ result, onReset }: Props) {
       {/* Actions */}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {(result.verdict === "str_filed" || result.verdict === "escalated") && (
-          <ActionButton
-            primary
-            label="View STR XML"
-            onClick={() => window.open(`/api/results/${result.tx_id}/str`, "_blank")}
-          />
+          <>
+            <ActionButton
+              primary
+              label="View STR XML"
+              onClick={() => window.open(`/api/results/${result.tx_id}/str`, "_blank")}
+            />
+            {result.str_pdf_url && (
+              <ActionButton
+                primary
+                label="View STR PDF"
+                onClick={() => window.open(`http://127.0.0.1:8000${result.str_pdf_url}`, "_blank")}
+              />
+            )}
+          </>
         )}
         {result.verdict === "human_review" && (
           <ActionButton primary label="Open in review queue" onClick={() => window.open("/review", "_blank")} />

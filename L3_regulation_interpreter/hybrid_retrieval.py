@@ -93,7 +93,22 @@ def build_search_query(event: Dict[str, Any]) -> Dict[str, Any]:
         if value:
             keywords.extend(_tokenize(value))
 
-    scenario = event.get("scenario_tag", "").replace("_", " ")
+    # Add L2 triggers to keywords
+    l2_triggers = event.get("l2_triggers_fired", [])
+    if l2_triggers:
+        for t in l2_triggers:
+            keywords.extend(_tokenize(t))
+
+    scenario = event.get("scenario_tag", "")
+    if not scenario:
+        if any("C5" in t for t in l2_triggers):
+            scenario = "CROSS_BORDER_LRS Liberalised Remittance Scheme LRS limits"
+        elif any("C1" in t for t in l2_triggers):
+            scenario = "structuring smurfing high value cash transactions"
+        else:
+            scenario = " ".join(l2_triggers).replace("_", " ")
+    scenario = scenario.replace("_", " ")
+    
     investigation = event.get("l3_investigation_notes", "")
     channel_str = event.get("channel", channel)
     txn_type = event.get("transaction_type", "").replace("_", " ")

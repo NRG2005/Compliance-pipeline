@@ -166,10 +166,12 @@ async def call_l2(state: dict) -> dict:
          state["suspicion_score"] = l2_result["suspicion_score"]
          state["composite_score"] = l2_result["suspicion_score"]
          state["triggers_fired"]  = l2_result["triggers"]
+         state["l2_evidence"]     = l2_result.get("evidence", {})
          
          # Inject into tx so L3 can use them!
          tx["l2_suspicion_score"] = state["suspicion_score"]
-         tx["l2_triggers_fired"] = state["triggers_fired"]
+         tx["l2_triggers_fired"]  = state["triggers_fired"]
+         tx["l2_evidence"]        = state["l2_evidence"]
 
     except Exception as e:
         log.error(f"L2 call failed for {tx['tx_id']}: {e}")

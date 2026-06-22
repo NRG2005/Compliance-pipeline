@@ -53,10 +53,10 @@ def _serialize_chunks(regulation_chunks: Sequence[Dict[str, Any]]) -> List[Dict[
             "document_id": chunk.get("document_id"),
             "title": chunk.get("title"),
             "section_id": chunk.get("section_id"),
-            "content": str(chunk.get("content", ""))[:800],  # Truncate string
+            "content": str(chunk.get("content", ""))[:3000],  # Increased to prevent cutting off rules
             "retrieval_score": chunk.get("retrieval_score"),
         }
-        for chunk in regulation_chunks[:2]
+        for chunk in regulation_chunks[:3]
     ]
 
 
