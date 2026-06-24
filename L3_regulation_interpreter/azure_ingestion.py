@@ -43,57 +43,20 @@ VECTOR_DIMENSIONS = 768  # nomic-embed-text generates 768 dimensions
 
 
 def download_blob_corpus() -> List[Dict[str, Any]]:
-    """Downloads all regulation PDF files from Blob Storage and converts them to document objects."""
-    print(f"Connecting to Blob Storage container: {BLOB_CONTAINER}...")
-    blob_service_client = BlobServiceClient.from_connection_string(BLOB_CONN_STR)
-    container_client = blob_service_client.get_container_client(BLOB_CONTAINER)
-    
-    from L3_regulation_interpreter.corpus_builder import pdf_to_document
-    import tempfile
-    
-    all_documents = []
-    
-    # Load tracker
-    tracker_file = Path("L3_regulation_interpreter/processed_blobs.json")
-    processed_blobs = set()
-    if tracker_file.exists():
-        processed_blobs = set(json.loads(tracker_file.read_text(encoding="utf-8")))
-    
-    blob_list = container_client.list_blobs()
-    for blob in blob_list:
-        if blob.name.lower().endswith('.pdf'):
-            if blob.name in processed_blobs:
-                print(f"Skipping '{blob.name}' (already processed)")
-                continue
-                
-            print(f"Downloading '{blob.name}'...")
-            blob_client = container_client.get_blob_client(blob)
-            blob_data = blob_client.download_blob().readall()
-            
-            # Save to temporary file to parse with PyPDF
-            try:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                    tmp.write(blob_data)
-                    tmp_path = Path(tmp.name)
-                
-                doc = pdf_to_document(tmp_path)
-                doc["document_id"] = blob.name.replace(".pdf", "").replace(".PDF", "")
-                doc["title"] = doc["document_id"]
-                all_documents.append(doc)
-                
-                processed_blobs.add(blob.name)
-                os.remove(tmp_path)
-            except Exception as e:
-                print(f"Skipping {blob.name} due to PDF parse error: {e}")
-                
-    # Save tracker
-    tracker_file.write_text(json.dumps(list(processed_blobs)), encoding="utf-8")
-                
-    if not all_documents:
-        print("Error: No PDF documents found in the Blob container.")
+    """Loads regulations from the local parsed JSON corpus instead of Blob Storage."""
+    print("Loading regulations from local corpus.json...")
+    corpus_path = Path("L3_regulation_interpreter/regulation_corpus.json")
+    if not corpus_path.exists():
+        print("Error: regulation_corpus.json not found.")
         sys.exit(1)
         
-    return all_documents
+    try:
+        with open(corpus_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get("documents", [])
+    except Exception as e:
+        print(f"Error loading local corpus: {e}")
+        sys.exit(1)
 
 
 import time
@@ -125,13 +88,19 @@ def setup_search_index(index_client: SearchIndexClient):
         SearchField(name="searchable_text", type=SearchFieldDataType.String, searchable=True),
         SearchField(name="section_heading", type=SearchFieldDataType.String, searchable=True),
         SearchField(
-            name="content_vector",
-            type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
+            name="key_phrases",
+            type=SearchFieldDataType.Collection(SearchFieldDataType.String),
             searchable=True,
-            vector_search_dimensions=VECTOR_DIMENSIONS,
-            vector_search_profile_name="myHnswProfile"
+            filterable=True,
+            facetable=True
         )
     ]
+
+    try:
+        index_client.delete_index(INDEX_NAME)
+        print(f"Deleted existing index '{INDEX_NAME}' to clear quota.")
+    except Exception:
+        pass
 
     index = SearchIndex(name=INDEX_NAME, fields=fields, vector_search=vector_search)
     index_client.create_or_update_index(index)
@@ -146,10 +115,22 @@ def _embed_with_retry(text: str) -> List[float]:
         time.sleep(2 ** attempt)
     return []
 
+import re
+
+def _extract_key_phrases(text: str) -> List[str]:
+    # Simplified local cognitive skill emulation
+    stopwords = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "as", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "can", "could", "shall", "should", "will", "would", "may", "might", "must", "it", "this", "that", "these", "those", "from", "which", "who", "whom", "whose", "what", "how", "why", "when", "where", "under", "over", "between", "through", "into", "onto", "upon", "about", "against", "among", "after", "before", "during", "while", "since", "until", "any", "all", "such", "other", "some", "no", "not", "only", "same", "so", "than", "too", "very"}
+    words = re.findall(r'\b[a-zA-Z]{4,}\b', text.lower())
+    freq = {}
+    for w in words:
+        if w not in stopwords:
+            freq[w] = freq.get(w, 0) + 1
+    sorted_words = sorted(freq.keys(), key=lambda w: freq[w], reverse=True)
+    return sorted_words[:15]
 
 def main():
-    if not all([BLOB_CONN_STR, SEARCH_ENDPOINT, SEARCH_API_KEY]):
-        print("Missing Azure credentials in .env file. Please configure them.")
+    if not all([SEARCH_ENDPOINT, SEARCH_API_KEY]):
+        print("Missing Azure Search credentials in .env file.")
         sys.exit(1)
         
     credential = AzureKeyCredential(SEARCH_API_KEY)
@@ -180,10 +161,11 @@ def main():
             continue
             
         chunk["content_vector"] = vector
-        chunk["chunk_id"] = chunk["chunk_id"].replace(":", "-").replace("_", "-")
+        chunk["key_phrases"] = _extract_key_phrases(chunk["searchable_text"])
+        chunk["chunk_id"] = re.sub(r'[^a-zA-Z0-9_\-=]', '-', chunk["chunk_id"])
         
         # Strip fields not in the Azure Index schema
-        allowed_keys = {"chunk_id", "document_id", "title", "content", "searchable_text", "section_heading", "content_vector"}
+        allowed_keys = {"chunk_id", "document_id", "title", "content", "searchable_text", "section_heading", "key_phrases"}
         clean_chunk = {k: v for k, v in chunk.items() if k in allowed_keys}
         
         batch.append(clean_chunk)

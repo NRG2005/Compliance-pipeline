@@ -167,6 +167,7 @@ async def call_l2(state: dict) -> dict:
          state["composite_score"] = l2_result["suspicion_score"]
          state["triggers_fired"]  = l2_result["triggers"]
          state["l2_evidence"]     = l2_result.get("evidence", {})
+         state["flag"]            = l2_result.get("flag", len(state["triggers_fired"]) > 0)
          
          # Inject into tx so L3 can use them!
          tx["l2_suspicion_score"] = state["suspicion_score"]
@@ -216,7 +217,7 @@ async def handle_event(tx: dict) -> dict:
         state = await call_l2(state)
         
         # Route to L3 if L2 flagged it
-        if state["suspicion_score"] is not None and state["suspicion_score"] > 0.0:
+        if state.get("flag"):
             log.info(f"L2 scored {state['suspicion_score']}. Routing to L3 for legal analysis.")
             state = await call_l3(state)
         else:

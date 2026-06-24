@@ -5,6 +5,7 @@ interface Props {
   rows: Transaction[];
   selected: number;
   onSelect: (i: number) => void;
+  totalCount?: number;
 }
 
 const CHANNEL_COLOR: Record<string, string> = {
@@ -13,7 +14,9 @@ const CHANNEL_COLOR: Record<string, string> = {
   RTGS: "var(--amber-600)",
 };
 
-export function TransactionTable({ rows, selected, onSelect }: Props) {
+export function TransactionTable({ rows, selected, onSelect, totalCount }: Props) {
+  const displayCount = totalCount ?? rows.length;
+  
   return (
     <div style={{ border: "0.5px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
       <div
@@ -31,7 +34,7 @@ export function TransactionTable({ rows, selected, onSelect }: Props) {
         }}
       >
         <span>Loaded transactions</span>
-        <span>{rows.length} row{rows.length !== 1 ? "s" : ""}</span>
+        <span>Showing {rows.length} of {displayCount} row{displayCount !== 1 ? "s" : ""}</span>
       </div>
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>

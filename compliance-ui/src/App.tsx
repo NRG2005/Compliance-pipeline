@@ -10,11 +10,23 @@ import type { Transaction } from "./types/pipeline";
 
 export default function App() {
   const [rows, setRows] = useState<Transaction[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
   const [queueStatus, setQueueStatus] = useState<string | null>(null);
   const [selectedRow, setSelectedRow] = useState(0);
   const { phase, layers, result, error, run, reset } = usePipeline();
 
-  const tx = rows[selectedRow];
+  const filteredRows = rows.filter((r) =>
+    r.tx_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    r.sender_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    r.receiver_name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+  
+  const itemsPerPage = 50;
+  const totalPages = Math.ceil(filteredRows.length / itemsPerPage);
+  const displayRows = filteredRows.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const tx = displayRows[selectedRow] ?? displayRows[0];
+
   const progress = phase === "processing"
     ? (layers.filter((l) => l.status !== "idle").length / LAYER_META.length) * 100
     : phase === "result" ? 100 : 0;
@@ -22,6 +34,8 @@ export default function App() {
   const handleReset = () => {
     reset();
     setRows([]);
+    setSearchQuery("");
+    setCurrentPage(1);
     setSelectedRow(0);
   };
 
@@ -140,7 +154,73 @@ export default function App() {
 
               {rows.length > 0 && (
                 <div style={{ marginTop: 16 }}>
-                  <TransactionTable rows={rows} selected={selectedRow} onSelect={setSelectedRow} />
+                  <div style={{ marginBottom: 12 }}>
+                    <input
+                      type="text"
+                      placeholder="Search by TX ID, sender, or receiver name..."
+                      value={searchQuery}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value);
+                        setSelectedRow(0);
+                      }}
+                      style={{
+                        width: "100%",
+                        padding: "10px 14px",
+                        fontSize: 13,
+                        borderRadius: 10,
+                        border: "0.5px solid var(--border)",
+                        background: "var(--card-bg)",
+                        color: "var(--text-primary)",
+                        outline: "none",
+                      }}
+                    />
+                  </div>
+                  <TransactionTable rows={displayRows} selected={selectedRow} onSelect={setSelectedRow} totalCount={filteredRows.length} />
+                  
+                  {totalPages > 1 && (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
+                      <button
+                        onClick={() => {
+                          setCurrentPage(p => Math.max(1, p - 1));
+                          setSelectedRow(0);
+                        }}
+                        disabled={currentPage === 1}
+                        style={{
+                          padding: "6px 12px",
+                          fontSize: 12,
+                          background: "var(--card-bg)",
+                          border: "0.5px solid var(--border)",
+                          borderRadius: 6,
+                          color: currentPage === 1 ? "var(--text-faint)" : "var(--text-primary)",
+                          cursor: currentPage === 1 ? "not-allowed" : "pointer"
+                        }}
+                      >
+                        ← Previous
+                      </button>
+                      <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                        Page {currentPage} of {totalPages}
+                      </span>
+                      <button
+                        onClick={() => {
+                          setCurrentPage(p => Math.min(totalPages, p + 1));
+                          setSelectedRow(0);
+                        }}
+                        disabled={currentPage === totalPages}
+                        style={{
+                          padding: "6px 12px",
+                          fontSize: 12,
+                          background: "var(--card-bg)",
+                          border: "0.5px solid var(--border)",
+                          borderRadius: 6,
+                          color: currentPage === totalPages ? "var(--text-faint)" : "var(--text-primary)",
+                          cursor: currentPage === totalPages ? "not-allowed" : "pointer"
+                        }}
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  )}
+
                   <button
                     onClick={() => tx && run(tx)}
                     disabled={!tx}

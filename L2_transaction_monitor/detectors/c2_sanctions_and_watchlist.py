@@ -535,26 +535,26 @@ def t2_check(event, watchlist, slm_low, slm_high, slm_judge_fn, slm_kwargs):
 
 def row_to_event(row):
     return {
-        "tx_id": row["tx_id"], "timestamp": row["timestamp"],
-        "channel": row["channel"], "amount_inr": float(row["amount_inr"]),
+        "tx_id": row.get("tx_id", ""), "timestamp": row.get("timestamp", ""),
+        "channel": row.get("channel", ""), "amount_inr": float(row.get("amount_inr", 0.0)),
         "sender": {
-            "account_id": row["sender_account_id"], "name": row["sender_name"],
-            "pan": row.get("sender_pan",""),
-            "bank_code": row["sender_bank"], "ifsc_code": row["sender_ifsc"],
-            "vpa": row.get("sender_vpa","") or None,
+            "account_id": row.get("sender_account_id", ""), "name": row.get("sender_name", ""),
+            "pan": row.get("sender_pan", ""),
+            "bank_code": row.get("sender_bank", ""), "ifsc_code": row.get("sender_ifsc", ""),
+            "vpa": row.get("sender_vpa", "") or None,
         },
         "receiver": {
-            "name": row["receiver_name"],
-            "pan": row.get("receiver_pan",""),
-            "dob": row.get("receiver_dob",""),
-            "cin": row.get("receiver_cin",""),
-            "address": row.get("receiver_address",""),
-            "phone": row.get("receiver_phone",""),
-            "account_external": row.get("receiver_account_external",""),
-            "bank_code": row.get("receiver_bank",""),
+            "name": row.get("receiver_name", ""),
+            "pan": row.get("receiver_pan", ""),
+            "dob": row.get("receiver_dob", ""),
+            "cin": row.get("receiver_cin", ""),
+            "address": row.get("receiver_address", ""),
+            "phone": row.get("receiver_phone", ""),
+            "account_external": row.get("receiver_account_external", ""),
+            "bank_code": row.get("receiver_bank", ""),
         },
-        "location": {"state": row.get("tx_location_state",""), "city": row.get("tx_location_city","")},
-        "purpose_code": row.get("purpose_code",""),
+        "location": {"state": row.get("tx_location_state", ""), "city": row.get("tx_location_city", "")},
+        "purpose_code": row.get("purpose_code", ""),
     }
 
 

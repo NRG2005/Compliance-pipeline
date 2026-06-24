@@ -73,7 +73,7 @@ def _call_gemini(
         }],
         "generationConfig": {
             "responseMimeType": "application/json",
-            "temperature": 0.1
+            "temperature": 0.0
         }
     }
 
@@ -132,7 +132,7 @@ def _call_ollama(
             {"role": "system", "content": augmented_system},
             {"role": "user", "content": user_prompt},
         ],
-        "temperature": 0.1,
+        "temperature": 0.0,
         "stream": False
     }
 

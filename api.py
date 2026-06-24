@@ -252,7 +252,7 @@ async def stream_transaction(tx: TransactionRequest):
 
                 suspicion_score = state.get("suspicion_score") or 0.0
                 triggers = state.get("triggers_fired") or []
-                flagged = suspicion_score > 0.0
+                flagged = state.get("flag", False)
 
                 # Build sub_checks from triggers your L2 actually fires
                 sub_checks = _triggers_to_sub_checks(triggers)
@@ -304,7 +304,7 @@ async def stream_transaction(tx: TransactionRequest):
                     layer_events.append(l3_event)
                     yield sse({"type": "layer_complete", "event": l3_event})
 
-                    if confidence >= 0.70:
+                    if confidence >= 0.60:
                         l2_evidence = {
                             "primary_category": "C1",
                             "l2_score": state.get("suspicion_score"),
@@ -361,7 +361,7 @@ async def stream_transaction(tx: TransactionRequest):
                     else:
                         l4_event = {
                             "layer": 4, "status": "skip", "chip_label": "Skipped",
-                            "detail": f"Confidence {confidence:.3f} < 0.70 — no auto-file",
+                            "detail": f"Confidence {confidence:.3f} < 0.60 — no auto-file",
                             "sub_checks": [], "sub_scores": [],
                         }
                     layer_events.append(l4_event)
@@ -597,7 +597,21 @@ def _extract_regulatory_basis(state: dict) -> list:
 
 def _state_to_verdict(state: dict, short_circuit: bool) -> str:
     if short_circuit:
-        return "clean"
+        match = state.get("memory_match", {})
+        cached_status = match.get("final_status") or match.get("verdict")
+        cached_conf = match.get("confidence") or 0.0
+        
+        if cached_status in ("clear", "clean"):
+            return "clean"
+            
+        if cached_conf >= 0.70:
+            return "str_filed"
+        if cached_conf >= 0.50:
+            return "human_review"
+            
+        if cached_status is None:
+            return "clean"
+        return "escalated"
     confidence = state.get("confidence")
     verdict = state.get("verdict", "")
     suspicion = state.get("suspicion_score") or 0.0
@@ -646,7 +660,7 @@ def _confidence_to_band(confidence) -> str:
     c = float(confidence)
     if c >= 0.90:
         return "auto_file"
-    if c >= 0.70:
+    if c >= 0.60:
         return "file_review"
     if c >= 0.50:
         return "human_first"

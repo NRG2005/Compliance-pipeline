@@ -27,7 +27,7 @@ config = get_config()
 
 DEFAULT_LOCAL_CORPUS_PATH = os.environ.get(
     "LOCAL_REGULATION_CORPUS_PATH",
-    str(Path(__file__).with_name("sample_regulations.json")),
+    str(Path(__file__).with_name("regulation_corpus.json")),
 )
 DEFAULT_TOP_K = int(os.environ.get("L3_TOP_K", "5"))
 DEFAULT_CHUNK_WORDS = int(os.environ.get("L3_CHUNK_WORDS", "400"))
@@ -103,8 +103,10 @@ def build_search_query(event: Dict[str, Any]) -> Dict[str, Any]:
     if not scenario:
         if any("C5" in t for t in l2_triggers):
             scenario = "CROSS_BORDER_LRS Liberalised Remittance Scheme LRS limits"
+        elif any("C1_high_value" in t for t in l2_triggers):
+            scenario = "high value transaction enhanced due diligence monitoring"
         elif any("C1" in t for t in l2_triggers):
-            scenario = "structuring smurfing high value cash transactions"
+            scenario = "structuring smurfing transaction splitting"
         else:
             scenario = " ".join(l2_triggers).replace("_", " ")
     scenario = scenario.replace("_", " ")
@@ -323,11 +325,10 @@ def search_regulations(
                 credential = AzureKeyCredential(key)
                 search_client = SearchClient(endpoint=endpoint, index_name=index_name, credential=credential)
                 
-                vector_query = VectorizedQuery(vector=query_vector, k_nearest_neighbors=top_k, fields="content_vector")
+                keyword_search_string = " ".join(query.get("keywords", []))
                 
                 results = search_client.search(
-                    search_text=query.get("query_text", ""), # Hybrid search
-                    vector_queries=[vector_query],
+                    search_text=keyword_search_string, # Pure keywords, no dilution
                     select=["chunk_id", "document_id", "title", "content", "section_heading"],
                     top=top_k
                 )

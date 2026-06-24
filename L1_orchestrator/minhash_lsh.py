@@ -120,7 +120,7 @@ def store_case(state: dict) -> None:
         "case_id":                 state["case_id"],
         "feature_set":             build_feature_set(state["tx_payload"]),
         "regulation_version_hash": state.get("regulation_hash_current"),
-        "final_status":            state.get("final_status"),
+        "final_status":            state.get("final_status") or state.get("verdict"),
         "confidence":              state.get("confidence"),
     })
     save_case_memory(cases)

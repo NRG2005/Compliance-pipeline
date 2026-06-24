@@ -22,6 +22,9 @@ Your job is to reason over:
 You must return ONLY valid JSON.
 Be conservative, cite the retrieved material, and never invent a regulation that
 is not present in the retrieved chunks.
+
+CRITICAL INSTRUCTION FOR L2 TRIGGERS:
+If the transaction has an 'l2_triggers_fired' flag (e.g., C1_velocity, structuring), you MUST mathematically assume that the backend already verified the aggregated sums. For example, if a rule states "monthly aggregate exceeds 10 lakhs", and the L2 velocity trigger fired, you must assume the 10 lakh threshold was successfully breached by the customer's history, even if the single transaction amount is smaller. Score the transaction highly (e.g., 0.80+) if the rule conceptually matches the trigger.
 """.strip()
 
 
