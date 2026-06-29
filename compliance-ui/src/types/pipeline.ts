@@ -1,87 +1,94 @@
-// ── Transaction ──────────────────────────────────────────────────────────────
-export interface Transaction {
-  tx_id: string;
-  timestamp: string;
-  channel: "UPI" | "NEFT" | "RTGS";
-  amount_inr: number;
-  sender_account_id: string;
-  sender_name: string;
-  sender_bank: string;
-  sender_ifsc: string;
-  sender_vpa?: string;
-  sender_pan?: string;
-  sender_dob?: string;
-  receiver_name: string;
-  receiver_account_external: string;
-  receiver_bank: string;
-  receiver_pan?: string;
-  receiver_dob?: string;
-  receiver_vpa?: string;
-  receiver_state: string;
-  receiver_city: string;
-  tx_location_state: string;
-  tx_location_city: string;
-  tx_location_country?: string;
-  tx_location_lat?: string;
-  tx_location_lon?: string;
-  purpose_code: string;
-  device_id: string;
-  is_cross_border?: string;
-  usd_equiv?: string;
-  fx_usd_inr?: string;
-  beneficiary_id?: string;
-  tx_status: string;
-}
+// types/pipeline.ts
 
-// ── Layer event (streamed from backend) ──────────────────────────────────────
-export type LayerStatus = "idle" | "running" | "pass" | "flag" | "str" | "skip" | "error";
+export type Verdict = "clean" | "str_filed" | "human_review" | "escalated" | "dismissed";
 
-export interface SubCheck {
-  label: string;
-  result: "pass" | "fail";
-  score?: number;
+export type ConfidenceBand =
+  | "auto_file"
+  | "file_review"
+  | "human_first"
+  | "priority_escalation"
+  | "n_a";
+
+export interface LayerEvent {
+  layer: string;
+  status: "pass" | "flag" | "str" | "skip" | "error" | "idle";
+  /** Per-layer SHA-256 block hash (populated by L6) */
+  block_hash?: string;
 }
 
 export interface SubScore {
   key: string;
-  value: number;
   weight: number;
+  value: number;
 }
 
-export interface LayerEvent {
-  layer: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
-  status: LayerStatus;
-  chip_label: string;
-  detail: string;
-  sub_checks?: SubCheck[];
-  sub_scores?: SubScore[];
-  latency_ms?: number;
-  str_pdf_url?: string;
+export interface L2Check {
+  /** Matches keys in ALL_L2_CHECKS: C1_velocity, C2_watchlist … C6_geo */
+  label: string;
+  result: "fail" | "pass";
 }
 
-// ── Final result ─────────────────────────────────────────────────────────────
-export type Verdict = "clean" | "str_filed" | "human_review" | "escalated" | "dismissed";
-export type ConfidenceBand = "auto_file" | "file_review" | "human_first" | "priority_escalation" | "n_a";
+export interface RegulatoryCitation {
+  /** e.g. "PMLA Rule 3(1)(b)" */
+  rule: string;
+  /** e.g. "Section 12 — Maintenance of Records" */
+  section: string;
+  /** e.g. "FIU-IND" | "RBI" | "FEMA" | "NPCI" */
+  body: string;
+  /** Plain-English description of why this rule applies */
+  description: string;
+  /** e.g. "Fallback — LLM not configured" — optional */
+  applicability?: string;
+}
+
+export interface SimilarCase {
+  id: string;
+  account: string;
+  verdict: string;
+  confidence: number;
+  days_ago: number;
+}
 
 export interface PipelineResult {
   tx_id: string;
   verdict: Verdict;
-  verdict_label: string;
   verdict_detail: string;
   confidence_band: ConfidenceBand;
   composite_score: number | null;
-  sub_scores: SubScore[];
-  l2_checks_fired: SubCheck[];
-  regulatory_basis: string[];
-  str_xml_path?: string;
-  audit_block_hash: string;
   processing_time_ms: number;
+  audit_block_hash: string;
   layer_events: LayerEvent[];
-}
+  sub_scores: SubScore[];
+  l2_checks_fired: L2Check[];
+  /** Legacy flat strings — used as fallback when regulatory_citation is absent */
+  regulatory_basis: string[];
 
-// ── SSE stream message ────────────────────────────────────────────────────────
-export type StreamMessage =
-  | { type: "layer_start"; layer: number }
-  | { type: "layer_complete"; event: LayerEvent }
-  | { type: "result"; result: PipelineResult }
-  | { type: "error"; message: string };
+  // ── New fields ──────────────────────────────────────────────────────────
+
+  /** Structured citation from L3. Supersedes regulatory_basis when present. */
+  regulatory_citation?: RegulatoryCitation;
+
+  /** GPT model used at L3, e.g. "GPT-5.1" */
+  model_version?: string;
+
+  /** Short hash of the regulation corpus version in effect, e.g. "a3f2c891" */
+  regulation_hash?: string;
+
+  /** Human-readable corpus freshness, e.g. "4h ago" */
+  corpus_freshness?: string;
+
+  /** Hours remaining before FIU-IND 7-day STR deadline. Omit for clean verdicts. */
+  deadline_hours?: number;
+
+  /** Per-layer processing time in seconds, keyed by layer name matching LayerEvent.layer */
+  layer_latencies?: Record<string, number>;
+
+  /** MinHash LSH similar cases from L1 case memory */
+  similar_cases?: SimilarCase[];
+
+  /** Raw goAML XML string from L4. Present when verdict is str_filed or escalated. */
+  str_xml?: string;
+
+  /** URL path to the generated STR PDF (served by FastAPI) */
+  str_pdf_url?: string;
+}

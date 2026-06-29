@@ -20,12 +20,14 @@ import os
 import sys
 import time
 from pathlib import Path
+import hashlib, json, time
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from datetime import datetime, timezone
 
 # ── Make sure repo root is on sys.path ────────────────────────────────────────
 ROOT = Path(__file__).parent
@@ -102,6 +104,8 @@ async def stream_transaction(tx: TransactionRequest):
     async def generate():
         start = time.monotonic()
         layer_events = []
+        layer_timings : dict[str, float] = {}
+        detection_timestamp_utc : str | None = None
 
         # Convert Pydantic model → plain dict that your pipeline functions expect
         tx_dict = tx.model_dump()
@@ -150,6 +154,7 @@ async def stream_transaction(tx: TransactionRequest):
             # ── L0: Publish to Azure Queue Storage ───────────────────────────
             yield sse({"type": "layer_start", "layer": 0})
             t0 = time.monotonic()
+            layer_timings["l0"] = round(time.monotonic() - t0, 3)
 
             try:
                 from L0_event_ingestion.event_receiver import get_queue_client
@@ -170,6 +175,7 @@ async def stream_transaction(tx: TransactionRequest):
                 "sub_checks": [],
                 "sub_scores": [],
                 "latency_ms": int((time.monotonic() - t0) * 1000),
+                "block_hash" : "",
             }
             layer_events.append(l0_event)
             yield sse({"type": "layer_complete", "event": l0_event})
@@ -177,11 +183,13 @@ async def stream_transaction(tx: TransactionRequest):
             # ── L1: Orchestrator (MinHash LSH + regulation hash check) ────────
             yield sse({"type": "layer_start", "layer": 1})
             t0 = time.monotonic()
+            layer_timings["l1"] = round(time.monotonic() - t0, 3)
 
             from L1_orchestrator.orchestrator import build_initial_state, run_l1_routing
 
             state = build_initial_state(tx_dict_str)
             state = run_l1_routing(state)
+            case_memory_matches = state.get("case_memory_matches") or []
 
             short_circuit = state["short_circuit"]
             l1_event = {
@@ -197,6 +205,7 @@ async def stream_transaction(tx: TransactionRequest):
                 "sub_checks": [],
                 "sub_scores": [],
                 "latency_ms": int((time.monotonic() - t0) * 1000),
+                "block_hash" : "",
             }
             layer_events.append(l1_event)
             yield sse({"type": "layer_complete", "event": l1_event})
@@ -217,6 +226,7 @@ async def stream_transaction(tx: TransactionRequest):
                 # ── L2: Transaction monitor (C1–C6 parallel checks) ──────────
                 yield sse({"type": "layer_start", "layer": 2})
                 t0 = time.monotonic()
+                layer_timings["l2"] = round(time.monotonic() - t0, 3)
 
                 import L1_orchestrator.orchestrator as l1_orch
                 state = await l1_orch.call_l2(state)
@@ -253,6 +263,8 @@ async def stream_transaction(tx: TransactionRequest):
                 suspicion_score = state.get("suspicion_score") or 0.0
                 triggers = state.get("triggers_fired") or []
                 flagged = state.get("flag", False)
+                if flagged and detection_timestamp_utc is None:
+                    detection_timestamp_utc = datetime.now(timezone.utc).isoformat()
 
                 # Build sub_checks from triggers your L2 actually fires
                 sub_checks = _triggers_to_sub_checks(triggers)
@@ -268,6 +280,7 @@ async def stream_transaction(tx: TransactionRequest):
                     "sub_checks": sub_checks,
                     "sub_scores": [],
                     "latency_ms": int((time.monotonic() - t0) * 1000),
+                    "block_hash": "",
                 }
                 layer_events.append(l2_event)
                 yield sse({"type": "layer_complete", "event": l2_event})
@@ -276,6 +289,7 @@ async def stream_transaction(tx: TransactionRequest):
                 if flagged:
                     yield sse({"type": "layer_start", "layer": 3})
                     t0 = time.monotonic()
+                    layer_timings["l3"] = round(time.monotonic() - t0, 3)
 
                     from L1_orchestrator.orchestrator import call_l3
                     state = await call_l3(state)
@@ -300,6 +314,7 @@ async def stream_transaction(tx: TransactionRequest):
                         "sub_checks": [],
                         "sub_scores": sub_scores,
                         "latency_ms": int((time.monotonic() - t0) * 1000),
+                        "block_hash": "",
                     }
                     layer_events.append(l3_event)
                     yield sse({"type": "layer_complete", "event": l3_event})
@@ -335,34 +350,41 @@ async def stream_transaction(tx: TransactionRequest):
                                 os.makedirs(pdf_dir, exist_ok=True)
                                 pdf_path = write_pdf_review_copy(l4_result, l3_verdict_obj, tx_l4, pdf_dir)
                                 pdf_url = f"/reports/{os.path.basename(pdf_path)}"
+                                str_xml = l4_result.get("xml_string") or l4_result.get("xml")
                                 l4_detail = f"STR PDF generated at {pdf_url}"
                                 l4_event = {
                                     "layer": 4, "status": "str",
                                     "chip_label": "STR generated",
                                     "detail": l4_detail,
                                     "sub_checks": [], "sub_scores": [],
-                                    "str_pdf_url": pdf_url
+                                    "str_pdf_url": pdf_url,
+                                    "block_hash": "",
                                 }
                             else:
+                                str_xml = None
                                 l4_detail = f"Failed to generate valid STR after {l4_result['attempts']} attempts"
                                 l4_event = {
                                     "layer": 4, "status": "error",
                                     "chip_label": "STR Error",
                                     "detail": l4_detail,
                                     "sub_checks": [], "sub_scores": [],
+                                    "block_hash": "",
                                 }
                         except Exception as e:
                             import traceback
+                            str_xml = None
                             l4_event = {
                                 "layer": 4, "status": "error", "chip_label": "L4 Error",
                                 "detail": f"Failed to run L4: {e}",
                                 "sub_checks": [], "sub_scores": [],
+                                "block_hash": "",
                             }
                     else:
                         l4_event = {
                             "layer": 4, "status": "skip", "chip_label": "Skipped",
                             "detail": f"Confidence {confidence:.3f} < 0.60 — no auto-file",
                             "sub_checks": [], "sub_scores": [],
+                            "block_hash": "",
                         }
                     layer_events.append(l4_event)
                     yield sse({"type": "layer_complete", "event": l4_event})
@@ -372,18 +394,21 @@ async def stream_transaction(tx: TransactionRequest):
                             "layer": 5, "status": "flag", "chip_label": "Queued for review",
                             "detail": "Evidence dossier created · 7-day FIU-IND deadline started",
                             "sub_checks": [], "sub_scores": [],
+                            "block_hash": "",
                         }
                     elif confidence >= 0.90:
                         l5_event = {
                             "layer": 5, "status": "skip", "chip_label": "Async review",
                             "detail": "Auto-filed at ≥ 0.90 · post-filing review queued",
                             "sub_checks": [], "sub_scores": [],
+                            "block_hash": "",
                         }
                     else:
                         l5_event = {
                             "layer": 5, "status": "flag", "chip_label": "Priority escalation",
                             "detail": "Confidence < 0.50 · compliance officer notified",
                             "sub_checks": [], "sub_scores": [],
+                            "block_hash": "",
                         }
                     layer_events.append(l5_event)
                     yield sse({"type": "layer_complete", "event": l5_event})
@@ -402,6 +427,7 @@ async def stream_transaction(tx: TransactionRequest):
             # ── L6: Audit logger (SHA-256 hash chain) ─────────────────────────
             yield sse({"type": "layer_start", "layer": 6})
             t0 = time.monotonic()
+            layer_timings["l6"] = round(time.monotonic() - t0, 3)
 
             block_data = f"{tx.tx_id}:{state.get('case_id','')}:{time.time()}"
             audit_hash = hashlib.sha256(block_data.encode()).hexdigest()
@@ -414,6 +440,7 @@ async def stream_transaction(tx: TransactionRequest):
                 ),
                 "sub_checks": [], "sub_scores": [],
                 "latency_ms": int((time.monotonic() - t0) * 1000),
+                "block_hash": audit_hash,
             }
             layer_events.append(l6_event)
             yield sse({"type": "layer_complete", "event": l6_event})
@@ -451,6 +478,18 @@ async def stream_transaction(tx: TransactionRequest):
                 "audit_block_hash": audit_hash,
                 "processing_time_ms": int((time.monotonic() - start) * 1000),
                 "layer_events": layer_events,
+                "regulatory_citation": _extract_regulatory_citation(state),
+                "model_version":       state.get("l3_model_version", "GPT-5.1"),
+                "regulation_hash":     (state.get("regulation_hash_current") or "")[:8] or None,
+                "corpus_freshness":    _get_corpus_freshness(),
+                "deadline_hours":      (
+                    max(0, round(168 - (datetime.now(timezone.utc) - datetime.fromisoformat(detection_timestamp_utc)).total_seconds() / 3600))
+                    if detection_timestamp_utc and verdict_str in ("str_filed", "escalated", "human_review")
+                    else None
+                ),
+                "layer_latencies":     layer_timings,
+                "similar_cases":       _build_similar_cases(case_memory_matches),
+                "str_xml":             locals().get("str_xml"),
             }
             if str_pdf_url:
                 result["str_pdf_url"] = str_pdf_url
@@ -519,7 +558,7 @@ def _triggers_to_sub_checks(triggers: list) -> list:
     for t in (triggers or []):
         if t in TRIGGER_LABELS and t not in seen:
             label, result = TRIGGER_LABELS[t]
-            checks.append({"label": label, "result": result})
+            checks.append({"label": t, "result": result})
             seen.add(t)
     return checks
 
@@ -666,6 +705,49 @@ def _confidence_to_band(confidence) -> str:
         return "human_first"
     return "priority_escalation"
 
+# --- Helper functions for similar cases and corpus freshness ---------
+def _extract_regulatory_citation(state: dict) -> dict | None:
+    rule = state.get("rule") or state.get("clause_no") or state.get("clause")
+    if not rule:
+        triggers = " ".join(state.get("triggers_fired") or []).lower()
+        if "structuring" in triggers or "velocity" in triggers:
+            return {"rule": "PMLA Rule 3(1)(b)", "section": "Section 12 — Maintenance of Records", "body": "FIU-IND", "description": "Structuring or splitting transactions to evade cash transaction reporting thresholds constitutes a suspicious transaction requiring mandatory STR filing.", "applicability": state.get("applicability_note") or "Inferred from L2 triggers — L3 LLM not configured"}
+        if "watchlist" in triggers:
+            return {"rule": "FIU-IND AML Direction — Clause 7", "section": "Clause 7 — Reporting Obligations", "body": "FIU-IND", "description": "Transactions involving sanctioned or watchlisted entities must be reported as suspicious transactions within 7 days of detection.", "applicability": "Inferred from L2 triggers"}
+        if "lrs" in triggers or "crossborder" in triggers:
+            return {"rule": "FEMA Master Direction 2024 — LRS", "section": "Section 4 — Liberalised Remittance Scheme", "body": "RBI", "description": "Remittances exceeding the LRS annual ceiling of USD 250,000 or split across beneficiaries to evade the limit are reportable under FEMA.", "applicability": "Inferred from L2 triggers"}
+        if "newaccount" in triggers or "dormancy" in triggers:
+            return {"rule": "RBI KYC Master Direction — Para 38", "section": "Para 38 — Enhanced Due Diligence", "body": "RBI", "description": "High-value transactions in newly opened or previously dormant accounts require enhanced due diligence and must be reported if suspicious.", "applicability": "Inferred from L2 triggers"}
+        return None
+    return {"rule": rule, "section": state.get("section", ""), "body": state.get("regulatory_body", "FIU-IND"), "description": state.get("rule_description") or state.get("explanation") or "", "applicability": state.get("applicability_note", "")}
+
+
+def _build_similar_cases(matches: list) -> list:
+    cases = []
+    now = datetime.now(timezone.utc)
+    for m in (matches or [])[:3]:
+        if not isinstance(m, dict):
+            continue
+        days_ago = 0
+        ts = m.get("timestamp") or m.get("created_at")
+        if ts:
+            try:
+                dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                days_ago = max(0, int((now - dt).total_seconds() / 86400))
+            except Exception:
+                days_ago = m.get("days_ago", 0)
+        cases.append({"id": m.get("tx_id", m.get("case_id", "unknown")), "account": m.get("sender_account_id", m.get("account_id", "")), "verdict": m.get("verdict", m.get("final_status", "unknown")), "confidence": float(m.get("confidence", 0.0)), "days_ago": days_ago})
+    return cases
+
+
+def _get_corpus_freshness() -> str | None:
+    for path in [ROOT / "data" / "regulatory_chunks.json", ROOT / "L3_regulation_interpreter" / "regulatory_chunks.json", ROOT / "regulatory_chunks.json"]:
+        if path.exists():
+            hours_ago = (time.time() - path.stat().st_mtime) / 3600
+            return "< 1h ago" if hours_ago < 1 else f"{int(hours_ago)}h ago" if hours_ago < 24 else f"{int(hours_ago / 24)}d ago"
+    return None
 
 # ── L0: Publish all transactions from uploaded CSV to the queue ───────────────
 class PublishRequest(BaseModel):
