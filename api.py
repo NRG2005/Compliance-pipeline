@@ -189,7 +189,7 @@ async def stream_transaction(tx: TransactionRequest):
                 "status": "pass" if short_circuit else "flag",
                 "chip_label": "Short-circuit" if short_circuit else "No cache hit",
                 "detail": (
-                    f"MinHash hit: {state['memory_similarity_score']:.2f} similarity · "
+                    f"MinHash hit on past tx {state.get('memory_match', {}).get('tx_id', 'Unknown')} ({state['memory_similarity_score']:.2f} similarity) · "
                     f"rule hash unchanged → skip L2/L3"
                     if short_circuit else
                     f"No case memory match · regulation hash: {(state.get('regulation_hash_current') or 'INITIAL')[:12]}… · routing to L2"
@@ -455,6 +455,9 @@ async def stream_transaction(tx: TransactionRequest):
             if str_pdf_url:
                 result["str_pdf_url"] = str_pdf_url
                 
+            from L1_orchestrator.orchestrator import store_case
+            store_case(state)
+                
             yield sse({"type": "result", "result": result})
 
         except Exception as exc:
@@ -642,7 +645,8 @@ def _verdict_label(verdict: str) -> str:
 def _verdict_detail(state: dict, short_circuit: bool) -> str:
     if short_circuit:
         score = state.get("memory_similarity_score")
-        return f"L1 short-circuit · {score:.2f} similarity · rule hash unchanged"
+        match_id = state.get("memory_match", {}).get("tx_id", "Unknown") if state.get("memory_match") else "Unknown"
+        return f"L1 short-circuit against past tx {match_id} · {score:.2f} similarity · rule hash unchanged"
     confidence = state.get("confidence")
     verdict = state.get("verdict", "")
     triggers = ", ".join(state.get("triggers_fired") or []) or "none"

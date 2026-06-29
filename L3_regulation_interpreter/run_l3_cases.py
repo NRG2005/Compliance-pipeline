@@ -34,7 +34,7 @@ def run_cases(transactions_path: str, corpus_path: str) -> Dict[str, Any]:
     results: List[Dict[str, Any]] = []
     for case in payload:
         retrieval = search_regulations(case, corpus_path=corpus_path)
-        analysis = generate_legal_analysis(case, retrieval["chunks"])
+        analysis = generate_legal_analysis(case, retrieval)
         results.append(
             {
                 "tx_id": case.get("tx_id"),
