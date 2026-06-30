@@ -74,6 +74,7 @@ export interface PipelineResult {
   l2_checks_fired: SubCheck[];
   regulatory_basis: string[];
   str_xml_path?: string;
+  str_pdf_url?: string;
   audit_block_hash: string;
   processing_time_ms: number;
   layer_events: LayerEvent[];

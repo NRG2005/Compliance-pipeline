@@ -197,6 +197,10 @@ async def call_l3(state: dict) -> dict:
         state["confidence"] = analysis.get("final_score")
         state["verdict"] = analysis.get("verdict")
         state["citation_trail"] = analysis.get("citation_trail")
+        state["explanation"] = analysis.get("explanation")
+        state["clause_no"] = analysis.get("clause_no")
+        state["clause"] = analysis.get("clause")
+        state["citation"] = analysis.get("citation")
     except Exception as e:
         log.error(f"L3 call failed for {tx['tx_id']}: {e}")
         state["verdict"] = "error"

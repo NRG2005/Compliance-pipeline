@@ -1,4 +1,4 @@
-import type { PipelineResult, StreamMessage, Transaction } from "../types/pipeline";
+import type { StreamMessage, Transaction } from "../types/pipeline";
 
 // ─── Base URL ─────────────────────────────────────────────────────────────────
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";

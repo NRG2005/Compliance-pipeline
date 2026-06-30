@@ -11,6 +11,7 @@ export interface LayerState {
   sub_checks: LayerEvent["sub_checks"];
   sub_scores: LayerEvent["sub_scores"];
   latency_ms?: number;
+  str_pdf_url?: string;
 }
 
 const INITIAL_LAYERS: LayerState[] = Array.from({ length: 8 }, () => ({

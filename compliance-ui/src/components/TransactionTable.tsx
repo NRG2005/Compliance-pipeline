@@ -14,9 +14,14 @@ const CHANNEL_COLOR: Record<string, string> = {
   RTGS: "var(--amber-600)",
 };
 
+const NEON_ROW_COLORS = [
+  "#00E5FF", "#FF00E5", "#00FF85", "#FFE600", "#FF8A00",
+  "#6A00FF", "#FF004C", "#19FFD8", "#B4FF00", "#FF5CC8",
+];
+
 export function TransactionTable({ rows, selected, onSelect, totalCount }: Props) {
   const displayCount = totalCount ?? rows.length;
-  
+
   return (
     <div style={{ border: "0.5px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
       <div
@@ -58,17 +63,23 @@ export function TransactionTable({ rows, selected, onSelect, totalCount }: Props
             </tr>
           </thead>
           <tbody>
-            {rows.map((tx, i) => (
+            {rows.map((tx, i) => {
+              const neon = NEON_ROW_COLORS[i % NEON_ROW_COLORS.length];
+              const isSel = i === selected;
+              return (
               <tr
                 key={tx.tx_id}
                 onClick={() => onSelect(i)}
                 style={{
                   cursor: "pointer",
-                  background: i === selected ? "var(--blue-50)" : "transparent",
+                  background: isSel ? `${neon}22` : "transparent",
                   borderBottom: "0.5px solid var(--border)",
+                  borderLeft: `3px solid ${neon}`,
+                  boxShadow: isSel ? `inset 0 0 18px ${neon}33, 0 0 10px ${neon}55` : "none",
+                  transition: "background 0.15s, box-shadow 0.2s",
                 }}
               >
-                <td style={{ padding: "7px 12px", fontFamily: "monospace", color: "var(--text-muted)" }}>
+                <td style={{ padding: "7px 12px", fontFamily: "monospace", color: neon, fontWeight: 600, textShadow: `0 0 6px ${neon}99` }}>
                   {tx.tx_id}
                 </td>
                 <td style={{ padding: "7px 12px" }}>
@@ -95,7 +106,8 @@ export function TransactionTable({ rows, selected, onSelect, totalCount }: Props
                   {tx.purpose_code}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

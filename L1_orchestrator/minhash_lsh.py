@@ -122,6 +122,7 @@ def store_case(state: dict) -> None:
         "regulation_version_hash": state.get("regulation_hash_current"),
         "final_status":            state.get("final_status") or state.get("verdict"),
         "confidence":              state.get("confidence"),
+        "str_pdf_url":             state.get("str_pdf_url"),
     })
     save_case_memory(cases)
     log.info(f"Stored case {state['tx_id']} in memory ({len(cases)} total)")

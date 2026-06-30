@@ -30,16 +30,6 @@ const STATUS_CHIP: Record<string, { label: string; bg: string; text: string }> =
   idle:    { label: "",            bg: "transparent", text: "transparent" },
 };
 
-const CARD_BORDER: Record<string, string> = {
-  running: "#93C5FD",
-  pass:    "#86EFAC",
-  flag:    "#FCD34D",
-  str:     "#FCA5A5",
-  skip:    "var(--border)",
-  error:   "#FCA5A5",
-  idle:    "var(--border)",
-};
-
 const CARD_BG: Record<string, string> = {
   running: "#EFF6FF",
   pass:    "#F0FDF4",
@@ -49,6 +39,11 @@ const CARD_BG: Record<string, string> = {
   error:   "#FFF1F2",
   idle:    "transparent",
 };
+
+const LAYER_NEON: string[] = [
+  "#00E5FF", "#22D3EE", "#3B82F6", "#0EA5E9",
+  "#60A5FA", "#0077FF", "#1D4ED8", "#38BDF8",
+];
 
 interface Props {
   index: number;
@@ -101,12 +96,16 @@ export function LayerCard({ index, state, isLast }: Props) {
       <div
         style={{
           flex: 1,
-          border: `0.5px solid ${CARD_BORDER[state.status] ?? "var(--border)"}`,
+          border: `1px solid ${LAYER_NEON[index] ? LAYER_NEON[index] + "88" : "var(--border)"}`,
           borderRadius: 12,
           padding: "9px 13px",
           minHeight: 48,
           background: CARD_BG[state.status] ?? "transparent",
           opacity: state.status === "skip" ? 0.45 : 1,
+          boxShadow:
+            state.status === "running"
+              ? `0 0 12px ${LAYER_NEON[index]}CC, 0 0 28px ${LAYER_NEON[index]}66, 0 0 52px ${LAYER_NEON[index]}2A`
+              : `0 0 8px ${LAYER_NEON[index]}77, 0 0 20px ${LAYER_NEON[index]}33`,
           transition: "all 0.3s",
           marginBottom: isLast ? 0 : 3,
         }}

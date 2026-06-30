@@ -173,7 +173,7 @@ export function ResultPanel({ result, onReset }: Props) {
               <ActionButton
                 primary
                 label="View STR PDF"
-                onClick={() => window.open(`http://127.0.0.1:8000${result.str_pdf_url}`, "_blank")}
+                onClick={() => window.open(result.str_pdf_url, "_blank")}
               />
             )}
           </>

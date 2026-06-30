@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { publishToQueue, getQueueStatus } from "./lib/api";
+import { useEffect, useRef, useState } from "react";
+import { publishToQueue } from "./lib/api";
 import { LayerCard, LAYER_META } from "./components/LayerCard";
 import { ResultPanel } from "./components/ResultPanel";
 import { TransactionTable } from "./components/TransactionTable";
@@ -8,13 +8,151 @@ import { usePipeline } from "./hooks/usePipeline";
 import { formatINR } from "./lib/csv";
 import type { Transaction } from "./types/pipeline";
 
+const NEON_BLOB_COLORS = [
+  "#22D3EE", "#7C3AED", "#3B82F6", "#8B5CF6",
+  "#0EA5E9", "#4F46E5", "#60A5FA", "#6D28D9",
+];
+
+type Blob = { x: number; y: number; vx: number; vy: number; r: number; color: string | null; phase: number };
+
+function NeonBlobBg() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const mouseRef = useRef({ x: -9999, y: -9999 });
+  const prevMouseRef = useRef({ x: -9999, y: -9999 });
+  const blobsRef = useRef<Blob[]>([]);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      prevMouseRef.current = { ...mouseRef.current };
+      mouseRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    };
+    window.addEventListener("mousemove", onMove);
+    return () => window.removeEventListener("mousemove", onMove);
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const init = () => {
+      const W = canvas.offsetWidth || 900;
+      const H = canvas.offsetHeight || 600;
+      canvas.width = W;
+      canvas.height = H;
+      const neon: Blob[] = NEON_BLOB_COLORS.map((color, i) => ({
+        x: Math.random() * W, y: Math.random() * H,
+        vx: (Math.random() - 0.5) * 1.0, vy: (Math.random() - 0.5) * 1.0,
+        r: 130 + Math.random() * 220,
+        color, phase: (i / NEON_BLOB_COLORS.length) * Math.PI * 2,
+      }));
+      const dark: Blob[] = Array.from({ length: 5 }, (_, i) => ({
+        x: Math.random() * W, y: Math.random() * H,
+        vx: (Math.random() - 0.5) * 0.6, vy: (Math.random() - 0.5) * 0.6,
+        r: 110 + Math.random() * 190,
+        color: null, phase: i * 1.3,
+      }));
+      blobsRef.current = [...neon, ...dark];
+    };
+
+    init();
+
+    let raf: number;
+    let t = 0;
+
+    const draw = () => {
+      t += 0.006;
+      const W = canvas.width;
+      const H = canvas.height;
+      const mouse = mouseRef.current;
+      ctx.clearRect(0, 0, W, H);
+
+      // Mouse velocity this frame — how fast the pointer moved
+      const mvx = mouse.x - prevMouseRef.current.x;
+      const mvy = mouse.y - prevMouseRef.current.y;
+      const mouseSpeed = Math.hypot(mvx, mvy);
+
+      for (const b of blobsRef.current) {
+        // Repel blobs based on pointer proximity × pointer speed
+        const bdx = b.x - mouse.x;
+        const bdy = b.y - mouse.y;
+        const bdist = Math.hypot(bdx, bdy) || 1;
+        const proximity = Math.max(0, 1 - bdist / 380);
+        const force = mouseSpeed * proximity * 0.45;
+        b.vx += (bdx / bdist) * force;
+        b.vy += (bdy / bdist) * force;
+
+        b.x += b.vx + Math.sin(t * 0.65 + b.phase) * 0.8;
+        b.y += b.vy + Math.cos(t * 0.5 + b.phase * 1.4) * 0.8;
+        b.vx *= 0.952;
+        b.vy *= 0.952;
+
+        if (b.x < -b.r) b.x = W + b.r;
+        if (b.x > W + b.r) b.x = -b.r;
+        if (b.y < -b.r) b.y = H + b.r;
+        if (b.y > H + b.r) b.y = -b.r;
+
+        if (b.color) {
+          const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r);
+          g.addColorStop(0, b.color + "99");
+          g.addColorStop(0.5, b.color + "3A");
+          g.addColorStop(1, b.color + "00");
+          ctx.fillStyle = g;
+        } else {
+          const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r);
+          g.addColorStop(0, "rgba(2,3,9,0.88)");
+          g.addColorStop(0.55, "rgba(2,3,9,0.45)");
+          g.addColorStop(1, "rgba(2,3,9,0)");
+          ctx.fillStyle = g;
+        }
+
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      raf = requestAnimationFrame(draw);
+    };
+
+    const ro = new ResizeObserver(() => {
+      canvas.width = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+    });
+    ro.observe(canvas);
+    raf = requestAnimationFrame(draw);
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
+  }, []);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        position: "absolute",
+        inset: 0,
+        width: "100%",
+        height: "100%",
+        filter: "blur(58px) saturate(1.3)",
+        opacity: 0.82,
+        pointerEvents: "none",
+        zIndex: 0,
+      }}
+    />
+  );
+}
+
 export default function App() {
   const [rows, setRows] = useState<Transaction[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [queueStatus, setQueueStatus] = useState<string | null>(null);
+  void queueStatus;
   const [selectedRow, setSelectedRow] = useState(0);
   const { phase, layers, result, error, run, reset } = usePipeline();
+
 
   const filteredRows = rows.filter((r) =>
     r.tx_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -47,7 +185,6 @@ export default function App() {
         fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       }}
     >
-      {/* Topbar */}
       <header
         style={{
           borderBottom: "0.5px solid var(--border)",
@@ -129,10 +266,13 @@ export default function App() {
         </aside>
 
         {/* Right main area */}
-        <main style={{ padding: "1.75rem 2rem", overflowY: "auto" }}>
+        <main style={{ padding: "1.75rem 2rem", overflowY: "auto", position: "relative" }}>
+          {/* Neon blob background — only visible in idle phase free space */}
+          {phase === "idle" && <NeonBlobBg />}
+
           {/* Phase: Upload */}
           {phase === "idle" && (
-            <div style={{ maxWidth: 680, margin: "0 auto" }}>
+            <div style={{ maxWidth: 680, margin: "0 auto", position: "relative", zIndex: 1 }}>
               <h1 style={{ fontSize: 20, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
                 Submit a transaction
               </h1>
@@ -228,15 +368,16 @@ export default function App() {
                       marginTop: 14,
                       width: "100%",
                       padding: "11px",
-                      background: "#1D4ED8",
+                      background: "linear-gradient(90deg, #00E5FF, #6A00FF)",
                       color: "#fff",
                       border: "none",
                       borderRadius: 10,
                       fontSize: 13,
-                      fontWeight: 500,
+                      fontWeight: 600,
                       cursor: "pointer",
                       opacity: tx ? 1 : 0.4,
-                      transition: "opacity 0.15s",
+                      boxShadow: tx ? "0 0 14px rgba(0,229,255,0.6), 0 0 26px rgba(106,0,255,0.35)" : "none",
+                      transition: "opacity 0.15s, box-shadow 0.2s",
                     }}
                   >
                     Run pipeline → {tx ? `${tx.tx_id} · ${formatINR(tx.amount_inr)}` : "select a row above"}
@@ -284,12 +425,15 @@ export default function App() {
               </div>
 
               {/* Progress strip */}
-              <div style={{ height: 2, background: "var(--border)", borderRadius: 99, overflow: "hidden", marginBottom: 16 }}>
+              <div style={{ height: 4, background: "var(--border)", borderRadius: 99, overflow: "hidden", marginBottom: 16 }}>
                 <div
                   style={{
                     height: "100%",
                     width: `${progress}%`,
-                    background: "#1D4ED8",
+                    background: "linear-gradient(90deg, #ff004c, #ff8a00, #ffe600, #00ff85, #00e5ff, #6a00ff, #ff00e5, #ff004c)",
+                    backgroundSize: "300% 100%",
+                    animation: "rainbowSlide 2s linear infinite",
+                    boxShadow: "0 0 8px rgba(0,229,255,0.55), 0 0 16px rgba(255,0,229,0.4)",
                     borderRadius: 99,
                     transition: "width 0.4s ease",
                   }}
@@ -345,36 +489,58 @@ export default function App() {
 
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        :root {
-          --bg: #F8F9FA;
-          --card-bg: #FFFFFF;
-          --surface: #F1F3F5;
-          --border: rgba(0,0,0,0.1);
-          --text-primary: #111827;
-          --text-muted: #6B7280;
-          --text-faint: #9CA3AF;
-          --blue-50: #EFF6FF;
-          --blue-400: #60A5FA;
-          --blue-600: #2563EB;
-          --green-600: #16A34A;
-          --amber-600: #D97706;
+        @keyframes rainbowSlide { to { background-position: 300% 0; } }
+        @keyframes neonPulse {
+          0%, 100% { box-shadow: 0 0 4px rgba(0,229,255,0.35), 0 0 12px rgba(0,229,255,0.15); }
+          50%      { box-shadow: 0 0 8px rgba(0,229,255,0.55), 0 0 22px rgba(0,229,255,0.28); }
         }
-        @media (prefers-color-scheme: dark) {
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        /* ── Neon theme: deep black + cyan/electric-blue glow ───────────────── */
+        :root {
+          --bg: #05060A;
+          --card-bg: #0B0E16;
+          --surface: #11151F;
+          --border: rgba(0,229,255,0.18);
+          --text-primary: #E8FBFF;
+          --text-muted: #7FA8B8;
+          --text-faint: #4E6B78;
+          --blue-50: #06222B;
+          --blue-400: #22D3EE;
+          --blue-600: #00E5FF;
+          --green-600: #00FFA3;
+          --amber-600: #FFB020;
+        }
+        /* Keep the same neon look regardless of OS light/dark preference */
+        @media (prefers-color-scheme: light) {
           :root {
-            --bg: #0F1117;
-            --card-bg: #1A1D27;
-            --surface: #252836;
-            --border: rgba(255,255,255,0.08);
-            --text-primary: #F1F5F9;
-            --text-muted: #94A3B8;
-            --text-faint: #64748B;
-            --blue-50: #1E2A45;
+            --bg: #05060A;
+            --card-bg: #0B0E16;
+            --surface: #11151F;
+            --border: rgba(0,229,255,0.18);
+            --text-primary: #E8FBFF;
+            --text-muted: #7FA8B8;
+            --text-faint: #4E6B78;
+            --blue-50: #06222B;
           }
         }
-        body { background: var(--bg); color: var(--text-primary); }
+        body {
+          background:
+            radial-gradient(900px 500px at 18% -10%, rgba(0,229,255,0.10), transparent 60%),
+            radial-gradient(900px 600px at 100% 0%, rgba(34,211,238,0.08), transparent 55%),
+            radial-gradient(700px 500px at 50% 120%, rgba(0,229,255,0.06), transparent 60%),
+            var(--bg);
+          background-attachment: fixed;
+          color: var(--text-primary);
+        }
+        /* Cyan glow on the primary-accent surfaces (uses existing #1D4ED8 brand chip too) */
+        header { box-shadow: 0 1px 0 rgba(0,229,255,0.12), 0 8px 24px -18px rgba(0,229,255,0.4); }
+        ::selection { background: rgba(0,229,255,0.30); color: #FFFFFF; }
         ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+        ::-webkit-scrollbar-thumb {
+          background: linear-gradient(180deg, #00E5FF, #22D3EE);
+          border-radius: 99px;
+        }
+        ::-webkit-scrollbar-track { background: transparent; }
       `}</style>
     </div>
   );

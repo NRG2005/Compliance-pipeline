@@ -210,6 +210,10 @@ async def stream_transaction(tx: TransactionRequest):
                         "chip_label": "Skipped", "detail": f"L1 short-circuit — {label}",
                         "sub_checks": [], "sub_scores": [],
                     }
+                    if layer_idx == 4 and state.get("memory_match", {}).get("str_pdf_url"):
+                        skip["str_pdf_url"] = state["memory_match"]["str_pdf_url"]
+                        skip["chip_label"] = "STR copied"
+                        skip["detail"] = "L1 short-circuit — Copied past STR"
                     layer_events.append(skip)
                     yield sse({"type": "layer_complete", "event": skip})
 
@@ -454,6 +458,7 @@ async def stream_transaction(tx: TransactionRequest):
             }
             if str_pdf_url:
                 result["str_pdf_url"] = str_pdf_url
+                state["str_pdf_url"] = str_pdf_url
                 
             from L1_orchestrator.orchestrator import store_case
             store_case(state)
