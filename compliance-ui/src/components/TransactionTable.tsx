@@ -72,14 +72,14 @@ export function TransactionTable({ rows, selected, onSelect, totalCount }: Props
                 onClick={() => onSelect(i)}
                 style={{
                   cursor: "pointer",
-                  background: isSel ? `${neon}22` : "transparent",
+                  background: isSel ? `${neon}14` : "transparent",
                   borderBottom: "0.5px solid var(--border)",
-                  borderLeft: `3px solid ${neon}`,
-                  boxShadow: isSel ? `inset 0 0 18px ${neon}33, 0 0 10px ${neon}55` : "none",
+                  borderLeft: `2px solid ${neon}99`,
+                  boxShadow: isSel ? `inset 0 0 10px ${neon}1a, 0 0 4px ${neon}33` : "none",
                   transition: "background 0.15s, box-shadow 0.2s",
                 }}
               >
-                <td style={{ padding: "7px 12px", fontFamily: "monospace", color: neon, fontWeight: 600, textShadow: `0 0 6px ${neon}99` }}>
+                <td style={{ padding: "7px 12px", fontFamily: "monospace", color: neon, fontWeight: 600 }}>
                   {tx.tx_id}
                 </td>
                 <td style={{ padding: "7px 12px" }}>

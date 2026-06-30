@@ -10,10 +10,10 @@ interface LayerMeta {
 }
 
 export const LAYER_META: LayerMeta[] = [
-  { id: "L0", name: "Event ingestion",        desc: "Service Bus · message lock · DLQ",          accentBg: "#F1EFE8", accentText: "#444441" },
-  { id: "L1", name: "Orchestrator",            desc: "GPT-5-mini · MinHash+LSH · case memory",    accentBg: "#EAF3DE", accentText: "#27500A" },
-  { id: "L2", name: "Transaction monitor",     desc: "T1 velocity · T2 watchlist · T3 risk · T4 geo", accentBg: "#E6F1FB", accentText: "#0C447C" },
-  { id: "L3", name: "Regulation interpreter",  desc: "GPT-5.1 · BM25 hybrid · 4 sub-scores",     accentBg: "#FAEEDA", accentText: "#633806" },
+  { id: "L0", name: "Event ingestion",        desc: "Azure Queue Storage · DLQ",          accentBg: "#F1EFE8", accentText: "#444441" },
+  { id: "L1", name: "Orchestrator",            desc: "MinHash+LSH · case memory",    accentBg: "#EAF3DE", accentText: "#27500A" },
+  { id: "L2", name: "Transaction monitor",     desc: "C1 Velocity & Structuring · C2 Sanctions & Watchlist · C3 Graph / Network Flow · C4 Account Risk & Dormancy . C5 Cross-Border / FEMA-LRS . C6 Geo-Anomaly", accentBg: "#E6F1FB", accentText: "#0C447C" },
+  { id: "L3", name: "Regulation interpreter",  desc: "Azure AI Search · BM25 hybrid · 4 sub-scores",     accentBg: "#FAEEDA", accentText: "#633806" },
   { id: "L4", name: "Report generator",        desc: "Jinja2 · lxml XSD · goAML XML",            accentBg: "#EEEDFE", accentText: "#3C3489" },
   { id: "L5", name: "Human review",            desc: "Next.js dashboard · 7-day deadline",        accentBg: "#E1F5EE", accentText: "#085041" },
   { id: "L6", name: "Audit logger",            desc: "SHA-256 chain · immutable Blob · GRS",      accentBg: "#F1EFE8", accentText: "#444441" },
