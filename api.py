@@ -78,7 +78,7 @@ class TransactionRequest(BaseModel):
     fx_usd_inr: str = ""
     beneficiary_id: str = ""
 
-    model_config = {"extra": "ignore"}  # silently drop any unexpected fields
+    model_config = {"extra": "allow"}  # preserve uploaded CSV columns for downstream checks
 
 
 # ── SSE helper ────────────────────────────────────────────────────────────────
@@ -115,14 +115,14 @@ async def stream_transaction(tx: TransactionRequest):
             json.dump(tx_dict_str, f, indent=2)
 
         # ── Field name bridge ─────────────────────────────────────────────────
-        # transactions.csv column is 'receiver_account_id' (values like EXT74234).
-        # The frontend maps it to 'receiver_account_external' (Transaction type).
-        # Re-expose under 'receiver_account_id' so c1_adapter same-beneficiary
-        # clustering and c3 graph traversal resolve the correct receiver node.
-        tx_dict_str["receiver_account_id"] = tx.receiver_account_external
-        tx_dict_str["receiver_pan"] = tx.receiver_pan
-        tx_dict_str["receiver_dob"] = tx.receiver_dob
-        tx_dict_str["receiver_cin"] = ""
+        # Prefer the explicit receiver_account_id when the UI provides it, else
+        # fall back to the legacy receiver_account_external mapping.
+        tx_dict_str["receiver_account_id"] = (
+            tx_dict_str.get("receiver_account_id")
+            or tx_dict_str.get("receiver_account_external")
+            or ""
+        )
+        tx_dict_str["receiver_cin"] = tx_dict_str.get("receiver_cin", "")
         # Use CSV's is_cross_border when present; fall back to SWIFT channel detection.
         # Cross-border determination
         is_foreign = False
@@ -140,11 +140,12 @@ async def stream_transaction(tx: TransactionRequest):
         )
         tx_dict_str["usd_equiv"] = tx.usd_equiv if tx.usd_equiv else str(float(tx.amount_inr) / 83.0)
         tx_dict_str["fx_usd_inr"] = tx.fx_usd_inr if tx.fx_usd_inr else "83.0"
-        tx_dict_str["beneficiary_id"] = tx.beneficiary_id or tx.receiver_account_external
-        tx_dict_str["sender_pan"] = tx.sender_pan
-        tx_dict_str["tx_location_country"] = tx.tx_location_country
-        tx_dict_str["tx_location_lat"] = tx.tx_location_lat
-        tx_dict_str["tx_location_lon"] = tx.tx_location_lon
+        tx_dict_str["beneficiary_id"] = (
+            tx_dict_str.get("beneficiary_id")
+            or tx_dict_str["receiver_account_id"]
+            or tx_dict_str.get("receiver_account_external")
+            or ""
+        )
 
         try:
             # ── L0: Publish to Azure Queue Storage ───────────────────────────

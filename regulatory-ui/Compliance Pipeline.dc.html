@@ -180,6 +180,13 @@ body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,
             </button>
           </sc-for>
         </div>
+        <sc-if value="{{ samplePager.show }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:center;gap:10px;margin-top:10px">
+            <button onClick="{{ samplePager.prev }}" style="{{ samplePager.prevStyle }}"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 3L5 8l5 5"/></svg>Prev</button>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8a8478">{{ samplePager.label }}</span>
+            <button onClick="{{ samplePager.next }}" style="{{ samplePager.nextStyle }}">Next<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3l5 5-5 5"/></svg></button>
+          </div>
+        </sc-if>
       </div>
       <button onClick="{{ replay }}" style="cursor:pointer;background:rgba(0,0,0,.04);border:1px solid rgba(0,0,0,.1);color:#54504a;font-size:12.5px;padding:9px 15px;border-radius:9px;display:flex;align-items:center;gap:7px" style-hover="background:rgba(0,0,0,.07)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 8a5 5 0 11-1.5-3.5M13 2v3h-3"/></svg>Replay this step</button>
     </div>
@@ -440,23 +447,32 @@ body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,
               <div style="font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:24px;color:#1a1712">{{ report.amt }}</div>
               <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8a8478">{{ report.ref }}</div>
             </div>
-            <div style="{{ report.ruleChipStyle }}">{{ report.rule }}</div>
-            <div style="font-size:14.5px;color:#3a352e;line-height:1.6;margin:14px 0 18px">{{ report.summary }}</div>
-            <div style="border:1px solid rgba(0,0,0,.08);border-radius:12px;overflow:hidden;margin-bottom:18px">
-              <sc-for list="{{ report.fields }}" as="r" hint-placeholder-count="5">
-                <div style="{{ r.rowStyle }}">
-                  <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8a8478;width:34%">{{ r.key }}</span>
-                  <span style="font-size:13.5px;color:#1a1712;font-weight:500;flex:1">{{ r.val }}</span>
-                </div>
-              </sc-for>
-            </div>
-            <div style="display:flex;align-items:center;gap:16px;padding:14px 16px;background:rgba(0,0,0,.02);border:1px solid rgba(0,0,0,.06);border-radius:12px">
-              <div style="{{ report.confValStyle }}">{{ report.confPct }}</div>
-              <div>
-                <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:14px;color:#1a1712">{{ report.confLabelUp }}</div>
-                <div style="font-size:12px;color:#6a655d;margin-top:2px">{{ report.confSub }}</div>
+            <sc-if value="{{ report.hasPdf }}" hint-placeholder-val="{{ false }}">
+              <div style="{{ report.ruleChipStyle }}">{{ report.rule }}</div>
+              <div style="border:1px solid rgba(0,0,0,.1);border-radius:12px;overflow:hidden;margin:14px 0 12px;background:#f3f0ea">
+                <iframe src="{{ report.pdfUrl }}" title="STR PDF" style="width:100%;height:560px;border:none;display:block"></iframe>
               </div>
-            </div>
+              <a href="{{ report.pdfUrl }}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:#2f6fd6;text-decoration:none;font-family:'Space Grotesk',sans-serif">Open PDF in new tab<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg></a>
+            </sc-if>
+            <sc-if value="{{ report.noPdf }}" hint-placeholder-val="{{ true }}">
+              <div style="{{ report.ruleChipStyle }}">{{ report.rule }}</div>
+              <div style="font-size:14.5px;color:#3a352e;line-height:1.6;margin:14px 0 18px">{{ report.summary }}</div>
+              <div style="border:1px solid rgba(0,0,0,.08);border-radius:12px;overflow:hidden;margin-bottom:18px">
+                <sc-for list="{{ report.fields }}" as="r" hint-placeholder-count="5">
+                  <div style="{{ r.rowStyle }}">
+                    <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8a8478;width:34%">{{ r.key }}</span>
+                    <span style="font-size:13.5px;color:#1a1712;font-weight:500;flex:1">{{ r.val }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="display:flex;align-items:center;gap:16px;padding:14px 16px;background:rgba(0,0,0,.02);border:1px solid rgba(0,0,0,.06);border-radius:12px">
+                <div style="{{ report.confValStyle }}">{{ report.confPct }}</div>
+                <div>
+                  <div style="font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:14px;color:#1a1712">{{ report.confLabelUp }}</div>
+                  <div style="font-size:12px;color:#6a655d;margin-top:2px">{{ report.confSub }}</div>
+                </div>
+              </div>
+            </sc-if>
             <div style="display:flex;align-items:center;justify-content:space-between;margin-top:18px;padding-top:14px;border-top:1px solid rgba(0,0,0,.07);font-family:'IBM Plex Mono',monospace;font-size:11px;color:#8a8478">
               <span>Compliance Pipeline · {{ ingest.lastScraped }}</span>
               <span>Auto-signed · digitally sealed</span>
@@ -490,7 +506,7 @@ class Component extends DCLogic {
     dstate: {}, graphShow: false, fanIn: false, verdictShow: false,
     demoStop: 0, ingestCount: 0, ingestDone: false,
     reportProgress: 0, filed: false, reportModal: false,
-    statT: 0, openCat: -1, focusArea: null,
+    statT: 0, openCat: -1, focusArea: null, samplePage: 0,
     userTxns: [], uploadName: '', lastScraped: this.nowStr()
   };
 
@@ -516,7 +532,8 @@ class Component extends DCLogic {
       if(rows.length){
         this.setState(st => {
           const userTxns = st.userTxns.concat(rows);
-          return { userTxns, uploadName: file.name, lastScraped: this.nowStr(), sample: this.SAMPLES.length + userTxns.length - 1 };
+          const newIdx = this.SAMPLES.length + userTxns.length - 1;
+          return { userTxns, uploadName: file.name, lastScraped: this.nowStr(), sample: newIdx, samplePage: Math.floor(newIdx / 10) };
         }, () => { if(this.state.step===1) this.goStep(1); });
       }
     };
@@ -524,21 +541,67 @@ class Component extends DCLogic {
     e.target.value = '';
   };
 
+  parseDelimitedRows(text){
+    const rows = [];
+    let currentField = '';
+    let currentRow = [];
+    let inQuotes = false;
+    for(let i = 0; i < text.length; i++){
+      const ch = text[i];
+      if(inQuotes){
+        if(ch === '"'){
+          if(text[i + 1] === '"'){
+            currentField += '"';
+            i += 1;
+          } else {
+            inQuotes = false;
+          }
+        } else {
+          currentField += ch;
+        }
+        continue;
+      }
+      if(ch === '"'){
+        inQuotes = true;
+      } else if(ch === ','){
+        currentRow.push(currentField);
+        currentField = '';
+      } else if(ch === '\n'){
+        currentRow.push(currentField);
+        rows.push(currentRow);
+        currentRow = [];
+        currentField = '';
+      } else if(ch !== '\r'){
+        currentField += ch;
+      }
+    }
+    currentRow.push(currentField);
+    rows.push(currentRow);
+    return rows.map(row => row.map(cell => cell.trim()));
+  }
+
   parseCsv(text){
     const cols = ['tx_id','timestamp','channel','amount_inr','sender_account_id','sender_name','receiver_name','purpose_code'];
-    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const lines = this.parseDelimitedRows(text).filter(row => row.some(cell => cell !== ''));
     if(!lines.length){ return []; }
     let start = 0, header = null;
-    if(/tx_id/i.test(lines[0])){ header = lines[0].split(',').map(s => s.trim()); start = 1; }
+    if(lines[0].some(cell => /tx_id/i.test(cell))){ header = lines[0].map(s => s.trim()); start = 1; }
     const out = [];
     for(let i = start; i < lines.length; i++){
-      const parts = lines[i].split(',').map(s => s.trim());
-      const get = (k) => { if(header){ const idx = header.findIndex(h => h.toLowerCase() === k); return idx >= 0 ? (parts[idx]||'') : ''; } return parts[cols.indexOf(k)] || ''; };
-      const amtNum = Number(get('amount_inr').replace(/[^0-9.]/g,'')) || 0;
+      const parts = lines[i];
+      const record = {};
+      if(header){
+        header.forEach((name, idx) => { if(name){ record[name.trim()] = parts[idx] || ''; } });
+      } else {
+        cols.forEach((name, idx) => { record[name] = parts[idx] || ''; });
+      }
+      const get = (k) => record[k] || '';
+      const amtNum = Number(String(get('amount_inr') || get('amount') || '').replace(/[^0-9.]/g,'')) || 0;
       const amt = '₹' + amtNum.toLocaleString('en-IN') + '.00';
-      const acct = get('sender_account_id');
+      const acct = get('sender_account_id') || get('sender_account') || '';
       const maskAcct = acct.length > 4 ? 'AC****' + acct.slice(-4) : (acct || '—');
       const ch = get('channel') || '—';
+      const receiverAccount = get('receiver_account_external') || get('receiver_account_id') || '';
       out.push({
         uploaded: true,
         name: (get('sender_name') || 'Uploaded').split(' ')[0],
@@ -546,6 +609,7 @@ class Component extends DCLogic {
         amount: amt, sender: get('sender_name') || '—', receiver: get('receiver_name') || '—',
         channel: ch + ' transfer', reference: get('tx_id') || ('TX' + Date.now()),
         raw: lines[i],
+        record,
         fields: [['tx_id',get('tx_id')||'—'],['timestamp',get('timestamp')||'—'],['channel',ch],['amount_inr',amt.replace('.00','')],['sender_account_id',maskAcct],['sender_name',get('sender_name')||'—'],['receiver_name',get('receiver_name')||'—'],['purpose_code',get('purpose_code')||'—']],
         results: { sanctions:{v:'clear',note:'No name on any watch-list'}, device:{v:'clear',note:'Uploaded record'}, split:{v:'clear',note:'Single payment'}, behaviour:{v:'clear',note:'From uploaded file'}, crossborder:{v:'clear',note:'Within limits'}, mule:{v:'clear',note:'Direct transfer'} },
         verdict: { tone:'clear', title:'AUTO-CLEARED', line:'Uploaded transaction — no flags raised.' }
@@ -563,17 +627,49 @@ class Component extends DCLogic {
 
   txPayload(sample){
     const f = {}; (sample.fields || []).forEach(([k, v]) => { f[k] = v; });
-    const amt = Number(String(sample.amount || f.amount_inr || '').replace(/[^0-9.]/g, '')) || 0;
+    const r = sample.record || {};
+    const read = (...keys) => {
+      for(const key of keys){
+        const value = r[key] ?? f[key] ?? sample[key];
+        if(value !== undefined && value !== null && value !== '') return value;
+      }
+      return '';
+    };
+    const amt = Number(String(read('amount_inr', 'amount')).replace(/[^0-9.]/g, '')) || 0;
+    const senderAccount = String(read('sender_account_id')).replace(/\*/g, 'X');
+    const receiverAccountExternal = String(read('receiver_account_external', 'receiver_account_id'));
     return {
-      tx_id: f.tx_id || sample.reference || ('TX' + Date.now()),
-      timestamp: f.timestamp || '',
-      channel: String(f.channel || sample.channel || 'UPI').split(' ')[0].toUpperCase(),
+      tx_id: read('tx_id') || sample.reference || ('TX' + Date.now()),
+      timestamp: read('timestamp'),
+      channel: String(read('channel', sample.channel || 'UPI')).split(' ')[0].toUpperCase(),
       amount_inr: amt,
-      sender_account_id: String(f.sender_account_id || '').replace(/\*/g, 'X'),
-      sender_name: f.sender_name || sample.sender || '',
-      receiver_name: f.receiver_name || sample.receiver || '',
-      receiver_account_external: 'EXT' + (String(f.tx_id || '').slice(-4) || '0000'),
-      purpose_code: f.purpose_code || ''
+      sender_account_id: senderAccount,
+      sender_name: read('sender_name') || sample.sender || '',
+      sender_bank: read('sender_bank'),
+      sender_ifsc: read('sender_ifsc'),
+      sender_vpa: read('sender_vpa'),
+      sender_pan: read('sender_pan'),
+      sender_dob: read('sender_dob'),
+      receiver_name: read('receiver_name') || sample.receiver || '',
+      receiver_account_external: receiverAccountExternal || ('EXT' + (String(read('tx_id') || '').slice(-4) || '0000')),
+      receiver_account_id: read('receiver_account_id') || receiverAccountExternal,
+      receiver_bank: read('receiver_bank'),
+      receiver_pan: read('receiver_pan'),
+      receiver_dob: read('receiver_dob'),
+      receiver_state: read('receiver_state'),
+      receiver_city: read('receiver_city'),
+      tx_location_state: read('tx_location_state'),
+      tx_location_city: read('tx_location_city'),
+      tx_location_country: read('tx_location_country'),
+      tx_location_lat: read('tx_location_lat'),
+      tx_location_lon: read('tx_location_lon'),
+      purpose_code: read('purpose_code'),
+      device_id: read('device_id'),
+      tx_status: read('tx_status'),
+      is_cross_border: read('is_cross_border'),
+      usd_equiv: read('usd_equiv'),
+      fx_usd_inr: read('fx_usd_inr'),
+      beneficiary_id: read('beneficiary_id') || receiverAccountExternal
     };
   }
 
@@ -603,7 +699,7 @@ class Component extends DCLogic {
     else if(v === 'str_filed') verdict = { tone:'hit', title:'ESCALATE — File STR', line: result.verdict_detail || 'Reportable to FIU-IND under PMLA, 2002.' };
     else if(v === 'human_review') verdict = { tone:'flag', title:'HOLD — Human review', line: result.verdict_detail || 'Queued for compliance review.' };
     else verdict = { tone:'hit', title:'ESCALATE — Priority', line: result.verdict_detail || 'Escalated to a compliance officer.' };
-    return { results, verdict, graphType: verdict.tone === 'clear' ? null : firstId };
+    return { results, verdict, clearGraph: verdict.tone === 'clear' };
   }
 
   streamPipeline(payload){
@@ -641,7 +737,12 @@ class Component extends DCLogic {
       const m = this.mapResult(result);
       sample.results = m.results;
       sample.verdict = m.verdict;
-      sample.graphType = m.graphType;
+      // Capture the real STR PDF that L4 generated (served from /reports on the
+      // backend) so the report page can embed the actual filed document.
+      sample.strPdfUrl = result.str_pdf_url || null;
+      // Keep the sample's authored graphType/graphMeta for flagged cases so the
+      // report + typology graph render exactly as before; only hide it when clean.
+      if(m.clearGraph) sample.graphType = null;
       sample.live = true;
     }).catch(() => { /* backend unreachable — keep the built-in demo data */ });
   }
@@ -739,7 +840,7 @@ class Component extends DCLogic {
   back = () => { this.clearTimers(); this.setState({ view:'overview' }); };
   replay = () => { this.goStep(this.state.step); };
   replayAll = () => { this.goStep(0); };
-  pickSample = (i) => { this.resetRun(); this.setState({ sample:i }); this.after(120,()=>this.goStep(this.state.step)); };
+  pickSample = (i) => { this.resetRun(); this.setState({ sample:i, samplePage: Math.floor(i / 10) }); this.after(120,()=>this.goStep(this.state.step)); };
 
   goStep = (i) => {
     this.resetRun();
@@ -980,12 +1081,26 @@ class Component extends DCLogic {
         numStyle:`flex:none;width:26px;height:26px;border-radius:8px;background:${numBg};color:${numCol};display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;font-family:'Space Grotesk',sans-serif` };
     });
 
-    // samples
-    const samples = this.allSamples.map((sm,i) => {
+    // samples — paginated 10 at a time so a large uploaded batch never floods the picker
+    const SAMPLE_PAGE = 10;
+    const allS = this.allSamples;
+    const totalPages = Math.max(1, Math.ceil(allS.length / SAMPLE_PAGE));
+    const curPage = Math.min(Math.max(0, st.samplePage), totalPages - 1);
+    const pageStart = curPage * SAMPLE_PAGE;
+    const samples = allS.slice(pageStart, pageStart + SAMPLE_PAGE).map((sm,j) => {
+      const i = pageStart + j;
       const on = i===st.sample;
       return { name:sm.name, tag:sm.tag, onClick:()=>this.pickSample(i),
         style:`cursor:pointer;text-align:left;padding:10px 15px;border-radius:11px;transition:.2s;border:1px solid ${on?'rgba(63,111,214,.55)':'rgba(0,0,0,.1)'};background:${on?'rgba(63,111,214,.1)':'#fffdfa'};color:${on?'#2a56ac':'#54504a'}` };
     });
+    const pageBtn = (enabled) => `cursor:${enabled?'pointer':'default'};background:rgba(0,0,0,.04);border:1px solid rgba(0,0,0,.1);color:${enabled?'#54504a':'#bdb7ad'};font-size:12.5px;padding:7px 12px;border-radius:9px;display:flex;align-items:center;gap:6px`;
+    const samplePager = {
+      show: allS.length > SAMPLE_PAGE,
+      label: `${pageStart + 1}–${Math.min(pageStart + SAMPLE_PAGE, allS.length)} of ${allS.length}`,
+      prevStyle: pageBtn(curPage > 0), nextStyle: pageBtn(curPage < totalPages - 1),
+      prev: () => { if(curPage > 0) this.setState({ samplePage: curPage - 1 }); },
+      next: () => { if(curPage < totalPages - 1) this.setState({ samplePage: curPage + 1 }); }
+    };
 
     // detectors
     const detectors = this.DET.map((d,i) => {
@@ -1114,6 +1229,9 @@ class Component extends DCLogic {
     const cleared = V.tone==='clear';
     const confTone = cleared ? '#1f9d63' : (cm.conf>=90 ? '#e0455a' : '#cf861b');
     report.openReport = this.openReport; report.closeReport = this.closeReport; report.stop = this.stopEvt; report.modalOpen = st.reportModal;
+    // Real STR PDF filed by L4 (absolute URL to the backend's /reports mount).
+    const pdfUrl = S.strPdfUrl ? (/^https?:/.test(S.strPdfUrl) ? S.strPdfUrl : this.BACKEND + S.strPdfUrl) : null;
+    report.pdfUrl = pdfUrl; report.hasPdf = !!pdfUrl; report.noPdf = !pdfUrl;
     report.confPct = cm.conf + '%';
     report.confLabelUp = cleared ? 'TYPOLOGY-MATCH CONFIDENCE' : 'SUSPICION CONFIDENCE';
     report.confSub = cleared ? 'Composite across all six risk engines' : 'Composite score · rules + ML ensemble';
@@ -1152,7 +1270,7 @@ class Component extends DCLogic {
       launch:this.launch, back:this.back, replay:this.replay, replayAll:this.replayAll,
       runReal:this.runReal, toDetect:this.toDetect, toReport:this.toReport,
       payment:{ amount:S.amount, sender:S.sender, receiver:S.receiver, channel:S.channel, reference:S.reference },
-      samples, steps, detectors, detNodeStyle,
+      samples, samplePager, steps, detectors, detNodeStyle,
       detectionEdges: this.detectionEdges(),
       graph, verdict,
       demo:{ stops:demoStops, coinLeft },
